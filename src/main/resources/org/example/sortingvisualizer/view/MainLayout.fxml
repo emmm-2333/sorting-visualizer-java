@@ -20,8 +20,11 @@
                   <ComboBox fx:id="algorithmComboBox" prefWidth="150.0" />
                   <Label text="数据量:" />
                   <TextField fx:id="dataSizeField" prefWidth="80.0" text="50" />
+                  <Label text="数据类型:" />
+                  <ComboBox fx:id="dataTypeComboBox" prefWidth="120.0" />
                   <Button fx:id="generateButton" mnemonicParsing="false" onAction="#onGenerateData" text="生成数据" />
                   <Button fx:id="sortButton" mnemonicParsing="false" onAction="#onSort" text="开始排序" />
+                  <Button fx:id="benchmarkButton" mnemonicParsing="false" onAction="#onBenchmark" text="性能比较" />
                </children>
                <padding>
                   <Insets bottom="10.0" left="10.0" right="10.0" top="10.0" />

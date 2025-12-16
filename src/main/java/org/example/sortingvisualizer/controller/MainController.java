@@ -11,9 +11,18 @@ import org.example.sortingvisualizer.algorithm.impl.BubbleSort;
 import org.example.sortingvisualizer.algorithm.impl.HeapSort;
 import org.example.sortingvisualizer.algorithm.impl.MergeSort;
 import org.example.sortingvisualizer.algorithm.impl.QuickSort;
+import org.example.sortingvisualizer.algorithm.impl.InsertionSort;
+import org.example.sortingvisualizer.algorithm.impl.SelectionSort;
 import org.example.sortingvisualizer.util.DataGenerator;
 import org.example.sortingvisualizer.view.VisualizerPane;
 import javafx.scene.paint.Color;
+import org.example.sortingvisualizer.view.VisualizerPane;
+import javafx.scene.chart.BarChart;
+import javafx.scene.chart.CategoryAxis;
+import javafx.scene.chart.NumberAxis;
+import javafx.scene.chart.XYChart;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainController {
 
@@ -24,13 +33,19 @@ public class MainController {
     private ComboBox<String> algorithmComboBox;
 
     @FXML
-    private TextField dataSizeField; // Changed from ComboBox to TextField
+    private TextField dataSizeField;
+
+    @FXML
+    private ComboBox<String> dataTypeComboBox;
 
     @FXML
     private Button generateButton;
 
     @FXML
     private Button sortButton;
+
+    @FXML
+    private Button benchmarkButton;
 
     @FXML
     private Slider speedSlider;
@@ -56,8 +71,11 @@ public class MainController {
         visualizerPane.heightProperty().addListener((obs, oldVal, newVal) -> visualizerPane.setArray(currentArray));
 
         // 初始化下拉框 (中文)
-        algorithmComboBox.getItems().addAll("冒泡排序", "快速排序", "归并排序", "堆排序");
+        algorithmComboBox.getItems().addAll("冒泡排序", "快速排序", "归并排序", "堆排序", "插入排序", "选择排序");
         algorithmComboBox.getSelectionModel().selectFirst();
+
+        dataTypeComboBox.getItems().addAll("随机数据", "有序数据", "递序数据", "部分有序");
+        dataTypeComboBox.getSelectionModel().selectFirst();
 
         // 速度滑块监听
         speedSlider.valueProperty().addListener((obs, oldVal, newVal) -> {
@@ -72,6 +90,11 @@ public class MainController {
 
     @FXML
     private void onGenerateData() {
+        // 切换回可视化面板（如果之前在图表模式）
+        if (rootPane.getCenter() != visualizerPane) {
+            rootPane.setCenter(visualizerPane);
+        }
+
         int size = 50;
         try {
             size = Integer.parseInt(dataSizeField.getText());
@@ -86,24 +109,31 @@ public class MainController {
             dataSizeField.setText("50");
         }
 
-        // 使用线性洗牌数据，保证排序后形成完美的梯度三角形
-        currentArray = DataGenerator.generateLinearShuffledData(size);
+        String type = dataTypeComboBox.getValue();
+        if (type == null) type = "随机数据";
+
+        switch (type) {
+            case "随机数据" -> currentArray = DataGenerator.generateLinearShuffledData(size);
+            case "有序数据" -> currentArray = DataGenerator.generateSortedData(size);
+            case "递序数据" -> currentArray = DataGenerator.generateReversedData(size);
+            case "部分有序" -> currentArray = DataGenerator.generateNearlySortedData(size);
+            default -> currentArray = DataGenerator.generateLinearShuffledData(size);
+        }
+
         visualizerPane.setArray(currentArray);
-        statusLabel.setText("数据已生成，准备排序。");
+        statusLabel.setText("数据已生成 (" + type + ")，准备排序。");
     }
 
     @FXML
     private void onSort() {
         if (currentArray == null) return;
+        // 切换回可视化面板
+        if (rootPane.getCenter() != visualizerPane) {
+            rootPane.setCenter(visualizerPane);
+        }
 
         String algoName = algorithmComboBox.getValue();
-        currentSorter = switch (algoName) {
-            case "冒泡排序" -> new BubbleSort();
-            case "快速排序" -> new QuickSort();
-            case "归并排序" -> new MergeSort();
-            case "堆排序" -> new HeapSort();
-            default -> new BubbleSort();
-        };
+        currentSorter = getSorterByName(algoName);
 
         // 禁用按钮防止重复点击
         setControlsDisabled(true);
@@ -172,10 +202,107 @@ public class MainController {
         new Thread(sortTask).start();
     }
 
+    private Sorter getSorterByName(String name) {
+        return switch (name) {
+            case "冒泡排序" -> new BubbleSort();
+            case "快速排序" -> new QuickSort();
+            case "归并排序" -> new MergeSort();
+            case "堆排序" -> new HeapSort();
+            case "插入排序" -> new InsertionSort();
+            case "选择排序" -> new SelectionSort();
+            default -> new BubbleSort();
+        };
+    }
+
+    @FXML
+    private void onBenchmark() {
+        int size = 500; // 默认基准测试大小
+        try {
+            size = Integer.parseInt(dataSizeField.getText());
+        } catch (NumberFormatException e) {
+            size = 500;
+        }
+
+        final int benchmarkSize = size;
+        final String dataType = dataTypeComboBox.getValue();
+
+        statusLabel.setText("正在进行性能比较...");
+        setControlsDisabled(true);
+
+        Task<List<XYChart.Data<String, Number>>> benchmarkTask = new Task<>() {
+            @Override
+            protected List<XYChart.Data<String, Number>> call() throws Exception {
+                List<XYChart.Data<String, Number>> results = new ArrayList<>();
+                String[] algos = {"冒泡排序", "快速排序", "归并排序", "堆排序", "插入排序", "选择排序"};
+
+                // 预生成一份数据，保证所有算法排序的是同一组数据
+                int[] baseArray;
+                switch (dataType) {
+                    case "有序数据" -> baseArray = DataGenerator.generateSortedData(benchmarkSize);
+                    case "递序数据" -> baseArray = DataGenerator.generateReversedData(benchmarkSize);
+                    case "部分有序" -> baseArray = DataGenerator.generateNearlySortedData(benchmarkSize);
+                    default -> baseArray = DataGenerator.generateLinearShuffledData(benchmarkSize);
+                }
+
+                for (String algoName : algos) {
+                    Sorter sorter = getSorterByName(algoName);
+                    int[] arrayCopy = baseArray.clone();
+
+                    long startTime = System.nanoTime();
+                    // 传入 null listener 表示不进行动画回调，纯跑算法
+                    sorter.sort(arrayCopy, null);
+                    long endTime = System.nanoTime();
+
+                    double durationMs = (endTime - startTime) / 1_000_000.0;
+                    results.add(new XYChart.Data<>(algoName, durationMs));
+                }
+                return results;
+            }
+
+            @Override
+            protected void succeeded() {
+                setControlsDisabled(false);
+                statusLabel.setText("性能比较完成！");
+                showBenchmarkChart(getValue(), benchmarkSize, dataType);
+            }
+
+            @Override
+            protected void failed() {
+                setControlsDisabled(false);
+                statusLabel.setText("性能比较失败: " + getException().getMessage());
+                getException().printStackTrace();
+            }
+        };
+
+        new Thread(benchmarkTask).start();
+    }
+
+    private void showBenchmarkChart(List<XYChart.Data<String, Number>> data, int size, String type) {
+        CategoryAxis xAxis = new CategoryAxis();
+        xAxis.setLabel("排序算法");
+
+        NumberAxis yAxis = new NumberAxis();
+        yAxis.setLabel("耗时 (毫秒)");
+
+        BarChart<String, Number> barChart = new BarChart<>(xAxis, yAxis);
+        barChart.setTitle("性能比较 - 数据量: " + size + " (" + type + ")");
+        barChart.setLegendVisible(false);
+
+        XYChart.Series<String, Number> series = new XYChart.Series<>();
+        series.getData().addAll(data);
+
+        barChart.getData().add(series);
+
+        // 切换中心视图为图表
+        rootPane.setCenter(barChart);
+    }
+
     private void setControlsDisabled(boolean disabled) {
         generateButton.setDisable(disabled);
         sortButton.setDisable(disabled);
+        benchmarkButton.setDisable(disabled);
         algorithmComboBox.setDisable(disabled);
         dataSizeField.setDisable(disabled);
+        dataTypeComboBox.setDisable(disabled);
     }
 }
