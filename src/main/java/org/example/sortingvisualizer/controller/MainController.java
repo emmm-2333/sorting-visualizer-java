@@ -13,6 +13,12 @@ import org.example.sortingvisualizer.algorithm.impl.MergeSort;
 import org.example.sortingvisualizer.algorithm.impl.QuickSort;
 import org.example.sortingvisualizer.algorithm.impl.InsertionSort;
 import org.example.sortingvisualizer.algorithm.impl.SelectionSort;
+import org.example.sortingvisualizer.algorithm.impl.CountingSort;
+import org.example.sortingvisualizer.algorithm.impl.BucketSort;
+import org.example.sortingvisualizer.algorithm.impl.RadixSort;
+import org.example.sortingvisualizer.algorithm.impl.BogoSort;
+import org.example.sortingvisualizer.algorithm.impl.SleepSort;
+import org.example.sortingvisualizer.algorithm.impl.BeadSort;
 import org.example.sortingvisualizer.util.DataGenerator;
 import org.example.sortingvisualizer.view.VisualizerPane;
 import javafx.scene.paint.Color;
@@ -71,7 +77,10 @@ public class MainController {
         visualizerPane.heightProperty().addListener((obs, oldVal, newVal) -> visualizerPane.setArray(currentArray));
 
         // 初始化下拉框 (中文)
-        algorithmComboBox.getItems().addAll("冒泡排序", "快速排序", "归并排序", "堆排序", "插入排序", "选择排序");
+        algorithmComboBox.getItems().addAll(
+            "冒泡排序", "快速排序", "归并排序", "堆排序", "插入排序", "选择排序",
+            "计数排序", "桶排序", "基数排序", "猴子排序", "睡眠排序", "珠排序"
+        );
         algorithmComboBox.getSelectionModel().selectFirst();
 
         dataTypeComboBox.getItems().addAll("随机数据", "有序数据", "递序数据", "部分有序");
@@ -210,6 +219,12 @@ public class MainController {
             case "堆排序" -> new HeapSort();
             case "插入排序" -> new InsertionSort();
             case "选择排序" -> new SelectionSort();
+            case "计数排序" -> new CountingSort();
+            case "桶排序" -> new BucketSort();
+            case "基数排序" -> new RadixSort();
+            case "猴子排序" -> new BogoSort();
+            case "睡眠排序" -> new SleepSort();
+            case "珠排序" -> new BeadSort();
             default -> new BubbleSort();
         };
     }
@@ -233,7 +248,11 @@ public class MainController {
             @Override
             protected List<XYChart.Data<String, Number>> call() throws Exception {
                 List<XYChart.Data<String, Number>> results = new ArrayList<>();
-                String[] algos = {"冒泡排序", "快速排序", "归并排序", "堆排序", "插入排序", "选择排序"};
+                String[] algos = {
+                    "冒泡排序", "快速排序", "归并排序", "堆排序", "插入排序", "选择排序",
+                    "计数排序", "桶排序", "基数排序", "珠排序"
+                    // 排除猴子排序和睡眠排序，因为它们太慢或不稳定
+                };
 
                 // 预生成一份数据，保证所有算法排序的是同一组数据
                 int[] baseArray;
