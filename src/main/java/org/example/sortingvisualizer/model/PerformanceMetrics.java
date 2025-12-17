@@ -9,11 +9,14 @@ public record PerformanceMetrics(
     String datasetType,
     int dataSize,
     long timeElapsedNanos,
-    long comparisons, // 预留：比较次数
-    long swaps        // 预留：交换次数
+    long memoryUsageBytes, // 新增：内存占用
+    AlgorithmInfo algorithmInfo // 新增：算法元数据
 ) {
     public double getTimeElapsedMillis() {
         return timeElapsedNanos / 1_000_000.0;
     }
-}
 
+    public double getMemoryUsageMB() {
+        return memoryUsageBytes / (1024.0 * 1024.0);
+    }
+}

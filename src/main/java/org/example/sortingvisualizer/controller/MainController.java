@@ -1,34 +1,21 @@
 package org.example.sortingvisualizer.controller;
 
-import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
-import org.example.sortingvisualizer.algorithm.SortStepListener;
-import org.example.sortingvisualizer.algorithm.Sorter;
-import org.example.sortingvisualizer.algorithm.impl.BubbleSort;
-import org.example.sortingvisualizer.algorithm.impl.HeapSort;
-import org.example.sortingvisualizer.algorithm.impl.MergeSort;
-import org.example.sortingvisualizer.algorithm.impl.QuickSort;
-import org.example.sortingvisualizer.algorithm.impl.InsertionSort;
-import org.example.sortingvisualizer.algorithm.impl.SelectionSort;
-import org.example.sortingvisualizer.algorithm.impl.CountingSort;
-import org.example.sortingvisualizer.algorithm.impl.BucketSort;
-import org.example.sortingvisualizer.algorithm.impl.RadixSort;
-import org.example.sortingvisualizer.algorithm.impl.BogoSort;
-import org.example.sortingvisualizer.algorithm.impl.SleepSort;
-import org.example.sortingvisualizer.algorithm.impl.BeadSort;
+import org.example.sortingvisualizer.algorithm.AlgorithmRegistry;
+import org.example.sortingvisualizer.model.PerformanceMetrics;
+import org.example.sortingvisualizer.service.BenchmarkService;
+import org.example.sortingvisualizer.service.SortingService;
 import org.example.sortingvisualizer.util.DataGenerator;
-import org.example.sortingvisualizer.view.VisualizerPane;
-import javafx.scene.paint.Color;
 import org.example.sortingvisualizer.view.VisualizerPane;
 import javafx.scene.chart.BarChart;
 import javafx.scene.chart.CategoryAxis;
 import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.XYChart;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class MainController {
 
@@ -61,7 +48,9 @@ public class MainController {
 
     private VisualizerPane visualizerPane;
     private int[] currentArray;
-    private Sorter currentSorter;
+
+    private final SortingService sortingService = new SortingService();
+    private final BenchmarkService benchmarkService = new BenchmarkService();
 
     // 动画延迟 (毫秒)
     private long delay = 50;
@@ -77,10 +66,7 @@ public class MainController {
         visualizerPane.heightProperty().addListener((obs, oldVal, newVal) -> visualizerPane.setArray(currentArray));
 
         // 初始化下拉框 (中文)
-        algorithmComboBox.getItems().addAll(
-            "冒泡排序", "快速排序", "归并排序", "堆排序", "插入排序", "选择排序",
-            "计数排序", "桶排序", "基数排序", "猴子排序", "睡眠排序", "珠排序"
-        );
+        algorithmComboBox.getItems().addAll(AlgorithmRegistry.getAllAlgorithmNames());
         algorithmComboBox.getSelectionModel().selectFirst();
 
         dataTypeComboBox.getItems().addAll("随机数据", "有序数据", "递序数据", "部分有序");
@@ -142,91 +128,24 @@ public class MainController {
         }
 
         String algoName = algorithmComboBox.getValue();
-        currentSorter = getSorterByName(algoName);
 
         // 禁用按钮防止重复点击
         setControlsDisabled(true);
         statusLabel.setText("正在使用 " + algoName + " 排序...");
 
-        // 在后台线程运行排序，避免阻塞 UI
-        Task<Void> sortTask = new Task<>() {
-            @Override
-            protected Void call() throws Exception {
-                // 复制一份数据进行排序，不破坏原始数据生成逻辑
-                int[] arrayToSort = currentArray.clone();
+        Task<Void> sortTask = sortingService.createSortTask(algoName, currentArray, visualizerPane, delay);
 
-                currentSorter.sort(arrayToSort, new SortStepListener() {
-                    @Override
-                    public void onCompare(int index1, int index2) {
-                        Platform.runLater(() -> visualizerPane.highlight(index1, index2, Color.RED));
-                        sleep();
-                    }
+        sortTask.setOnSucceeded(e -> {
+            setControlsDisabled(false);
+            statusLabel.setText("排序完成！");
+        });
 
-                    @Override
-                    public void onSwap(int index1, int index2) {
-                        Platform.runLater(() -> {
-                            visualizerPane.updateArray(arrayToSort);
-                            visualizerPane.highlight(index1, index2, Color.GREEN);
-                        });
-                        sleep();
-                    }
-
-                    @Override
-                    public void onSet(int index, int value) {
-                         Platform.runLater(() -> {
-                            visualizerPane.updateArray(arrayToSort);
-                            visualizerPane.highlight(index, index, Color.GREEN);
-                        });
-                        sleep();
-                    }
-
-                    private void sleep() {
-                        try {
-                            Thread.sleep(delay);
-                        } catch (InterruptedException e) {
-                            // ignore
-                        }
-                    }
-                });
-
-                // 排序完成，最后刷新一次
-                Platform.runLater(() -> visualizerPane.updateArray(arrayToSort));
-
-                return null;
-            }
-
-            @Override
-            protected void succeeded() {
-                setControlsDisabled(false);
-                statusLabel.setText("排序完成！");
-            }
-
-            @Override
-            protected void failed() {
-                setControlsDisabled(false);
-                statusLabel.setText("排序失败: " + getException().getMessage());
-            }
-        };
+        sortTask.setOnFailed(e -> {
+            setControlsDisabled(false);
+            statusLabel.setText("排序失败: " + sortTask.getException().getMessage());
+        });
 
         new Thread(sortTask).start();
-    }
-
-    private Sorter getSorterByName(String name) {
-        return switch (name) {
-            case "冒泡排序" -> new BubbleSort();
-            case "快速排序" -> new QuickSort();
-            case "归并排序" -> new MergeSort();
-            case "堆排序" -> new HeapSort();
-            case "插入排序" -> new InsertionSort();
-            case "选择排序" -> new SelectionSort();
-            case "计数排序" -> new CountingSort();
-            case "桶排序" -> new BucketSort();
-            case "基数排序" -> new RadixSort();
-            case "猴子排序" -> new BogoSort();
-            case "睡眠排序" -> new SleepSort();
-            case "珠排序" -> new BeadSort();
-            default -> new BubbleSort();
-        };
     }
 
     @FXML
@@ -244,76 +163,105 @@ public class MainController {
         statusLabel.setText("正在进行性能比较...");
         setControlsDisabled(true);
 
-        Task<List<XYChart.Data<String, Number>>> benchmarkTask = new Task<>() {
-            @Override
-            protected List<XYChart.Data<String, Number>> call() throws Exception {
-                List<XYChart.Data<String, Number>> results = new ArrayList<>();
-                String[] algos = {
-                    "冒泡排序", "快速排序", "归并排序", "堆排序", "插入排序", "选择排序",
-                    "计数排序", "桶排序", "基数排序", "珠排序"
-                    // 排除猴子排序和睡眠排序，因为它们太慢或不稳定
-                };
+        List<String> algos = AlgorithmRegistry.getAllAlgorithmNames().stream()
+                .filter(name -> !name.equals("猴子排序") && !name.equals("睡眠排序"))
+                .collect(Collectors.toList());
 
-                // 预生成一份数据，保证所有算法排序的是同一组数据
-                int[] baseArray;
-                switch (dataType) {
-                    case "有序数据" -> baseArray = DataGenerator.generateSortedData(benchmarkSize);
-                    case "递序数据" -> baseArray = DataGenerator.generateReversedData(benchmarkSize);
-                    case "部分有序" -> baseArray = DataGenerator.generateNearlySortedData(benchmarkSize);
-                    default -> baseArray = DataGenerator.generateLinearShuffledData(benchmarkSize);
-                }
+        Task<List<PerformanceMetrics>> benchmarkTask = benchmarkService.createBenchmarkTask(benchmarkSize, dataType, algos);
 
-                for (String algoName : algos) {
-                    Sorter sorter = getSorterByName(algoName);
-                    int[] arrayCopy = baseArray.clone();
+        benchmarkTask.setOnSucceeded(e -> {
+            setControlsDisabled(false);
+            statusLabel.setText("性能比较完成！");
+            showBenchmarkResults(benchmarkTask.getValue(), benchmarkSize, dataType);
+        });
 
-                    long startTime = System.nanoTime();
-                    // 传入 null listener 表示不进行动画回调，纯跑算法
-                    sorter.sort(arrayCopy, null);
-                    long endTime = System.nanoTime();
-
-                    double durationMs = (endTime - startTime) / 1_000_000.0;
-                    results.add(new XYChart.Data<>(algoName, durationMs));
-                }
-                return results;
-            }
-
-            @Override
-            protected void succeeded() {
-                setControlsDisabled(false);
-                statusLabel.setText("性能比较完成！");
-                showBenchmarkChart(getValue(), benchmarkSize, dataType);
-            }
-
-            @Override
-            protected void failed() {
-                setControlsDisabled(false);
-                statusLabel.setText("性能比较失败: " + getException().getMessage());
-                getException().printStackTrace();
-            }
-        };
+        benchmarkTask.setOnFailed(e -> {
+            setControlsDisabled(false);
+            statusLabel.setText("性能比较失败: " + benchmarkTask.getException().getMessage());
+            benchmarkTask.getException().printStackTrace();
+        });
 
         new Thread(benchmarkTask).start();
     }
 
-    private void showBenchmarkChart(List<XYChart.Data<String, Number>> data, int size, String type) {
+    private void showBenchmarkResults(List<PerformanceMetrics> metrics, int size, String type) {
+        TabPane tabPane = new TabPane();
+
+        // Tab 1: 时间对比图
+        Tab timeTab = new Tab("时间对比", createTimeChart(metrics));
+        timeTab.setClosable(false);
+
+        // Tab 2: 内存对比图
+        Tab memoryTab = new Tab("内存对比", createMemoryChart(metrics));
+        memoryTab.setClosable(false);
+
+        // Tab 3: 详细数据表
+        Tab tableTab = new Tab("详细数据", createDetailTable(metrics));
+        tableTab.setClosable(false);
+
+        tabPane.getTabs().addAll(timeTab, memoryTab, tableTab);
+        rootPane.setCenter(tabPane);
+    }
+
+    private BarChart<String, Number> createTimeChart(List<PerformanceMetrics> metrics) {
         CategoryAxis xAxis = new CategoryAxis();
         xAxis.setLabel("排序算法");
-
         NumberAxis yAxis = new NumberAxis();
         yAxis.setLabel("耗时 (毫秒)");
 
         BarChart<String, Number> barChart = new BarChart<>(xAxis, yAxis);
-        barChart.setTitle("性能比较 - 数据量: " + size + " (" + type + ")");
+        barChart.setTitle("算法耗时对比");
         barChart.setLegendVisible(false);
 
         XYChart.Series<String, Number> series = new XYChart.Series<>();
-        series.getData().addAll(data);
-
+        for (PerformanceMetrics m : metrics) {
+            series.getData().add(new XYChart.Data<>(m.algorithmName(), m.getTimeElapsedMillis()));
+        }
         barChart.getData().add(series);
+        return barChart;
+    }
 
-        // 切换中心视图为图表
-        rootPane.setCenter(barChart);
+    private BarChart<String, Number> createMemoryChart(List<PerformanceMetrics> metrics) {
+        CategoryAxis xAxis = new CategoryAxis();
+        xAxis.setLabel("排序算法");
+        NumberAxis yAxis = new NumberAxis();
+        yAxis.setLabel("内存占用 (MB)");
+
+        BarChart<String, Number> barChart = new BarChart<>(xAxis, yAxis);
+        barChart.setTitle("算法内存占用对比 (估算)");
+        barChart.setLegendVisible(false);
+
+        XYChart.Series<String, Number> series = new XYChart.Series<>();
+        for (PerformanceMetrics m : metrics) {
+            series.getData().add(new XYChart.Data<>(m.algorithmName(), m.getMemoryUsageMB()));
+        }
+        barChart.getData().add(series);
+        return barChart;
+    }
+
+    private TableView<PerformanceMetrics> createDetailTable(List<PerformanceMetrics> metrics) {
+        TableView<PerformanceMetrics> table = new TableView<>();
+
+        TableColumn<PerformanceMetrics, String> nameCol = new TableColumn<>("算法名称");
+        nameCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(data.getValue().algorithmName()));
+
+        TableColumn<PerformanceMetrics, Number> timeCol = new TableColumn<>("耗时 (ms)");
+        timeCol.setCellValueFactory(data -> new javafx.beans.property.SimpleDoubleProperty(data.getValue().getTimeElapsedMillis()));
+
+        TableColumn<PerformanceMetrics, String> complexityCol = new TableColumn<>("平均时间复杂度");
+        complexityCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(data.getValue().algorithmInfo().averageTimeComplexity()));
+
+        TableColumn<PerformanceMetrics, String> spaceCol = new TableColumn<>("空间复杂度");
+        spaceCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(data.getValue().algorithmInfo().spaceComplexity()));
+
+        TableColumn<PerformanceMetrics, String> stableCol = new TableColumn<>("稳定性");
+        stableCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(data.getValue().algorithmInfo().isStable() ? "是" : "否"));
+
+        table.getColumns().addAll(nameCol, timeCol, complexityCol, spaceCol, stableCol);
+        table.getItems().addAll(metrics);
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+        return table;
     }
 
     private void setControlsDisabled(boolean disabled) {
