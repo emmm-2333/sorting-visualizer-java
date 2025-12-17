@@ -69,7 +69,7 @@ public class MainController {
         algorithmComboBox.getItems().addAll(AlgorithmRegistry.getAllAlgorithmNames());
         algorithmComboBox.getSelectionModel().selectFirst();
 
-        dataTypeComboBox.getItems().addAll("随机数据", "有序数据", "递序数据", "部分有序");
+        dataTypeComboBox.getItems().addAll("随机数据", "有序数据", "逆序数据", "部分有序");
         dataTypeComboBox.getSelectionModel().selectFirst();
 
         // 速度滑块监听
@@ -110,7 +110,7 @@ public class MainController {
         switch (type) {
             case "随机数据" -> currentArray = DataGenerator.generateLinearShuffledData(size);
             case "有序数据" -> currentArray = DataGenerator.generateSortedData(size);
-            case "递序数据" -> currentArray = DataGenerator.generateReversedData(size);
+            case "逆序数据" -> currentArray = DataGenerator.generateReversedData(size);
             case "部分有序" -> currentArray = DataGenerator.generateNearlySortedData(size);
             default -> currentArray = DataGenerator.generateLinearShuffledData(size);
         }
@@ -133,7 +133,7 @@ public class MainController {
         setControlsDisabled(true);
         statusLabel.setText("正在使用 " + algoName + " 排序...");
 
-        Task<Void> sortTask = sortingService.createSortTask(algoName, currentArray, visualizerPane, delay);
+        Task<Void> sortTask = sortingService.createSortTask(algoName, currentArray, visualizerPane, () -> delay);
 
         sortTask.setOnSucceeded(e -> {
             setControlsDisabled(false);
@@ -150,7 +150,7 @@ public class MainController {
 
     @FXML
     private void onBenchmark() {
-        int size = 500; // 默认基准测试大小
+        int size; // 默认基准测试大小
         try {
             size = Integer.parseInt(dataSizeField.getText());
         } catch (NumberFormatException e) {

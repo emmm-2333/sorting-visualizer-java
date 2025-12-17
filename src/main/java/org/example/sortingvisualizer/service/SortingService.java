@@ -8,9 +8,11 @@ import org.example.sortingvisualizer.algorithm.SortStepListener;
 import org.example.sortingvisualizer.algorithm.Sorter;
 import org.example.sortingvisualizer.view.VisualizerPane;
 
+import java.util.function.LongSupplier;
+
 public class SortingService {
 
-    public Task<Void> createSortTask(String algorithmName, int[] data, VisualizerPane visualizerPane, long delay) {
+    public Task<Void> createSortTask(String algorithmName, int[] data, VisualizerPane visualizerPane, LongSupplier delaySupplier) {
         return new Task<>() {
             @Override
             protected Void call() throws Exception {
@@ -46,7 +48,7 @@ public class SortingService {
 
                     private void sleep() {
                         try {
-                            Thread.sleep(delay);
+                            Thread.sleep(delaySupplier.getAsLong());
                         } catch (InterruptedException e) {
                             // ignore
                         }

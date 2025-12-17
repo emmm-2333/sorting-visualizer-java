@@ -14,9 +14,12 @@ public class SortingVisualizerApp extends Application {
 
     @Override
     public void start(Stage stage) throws IOException {
-        FXMLLoader fxmlLoader = new FXMLLoader(SortingVisualizerApp.class.getResource("view/MainLayout.fxml"));
+        // 使用绝对类路径，确保在打包和运行时都能找到 FXML
+        FXMLLoader fxmlLoader = new FXMLLoader(
+            SortingVisualizerApp.class.getResource("/org/example/sortingvisualizer/view/MainLayout.fxml")
+        );
         Scene scene = new Scene(fxmlLoader.load(), 800, 600);
-        stage.setTitle("Sorting Algorithm Visualizer");
+        stage.setTitle("排序算法性能比较与动画演示系统");
         stage.setScene(scene);
         stage.show();
     }
@@ -25,4 +28,3 @@ public class SortingVisualizerApp extends Application {
         launch();
     }
 }
-
