@@ -284,8 +284,9 @@ public class MainController {
         statusLabel.setText("正在进行性能比较...");
         setControlsDisabled(true);
 
+        // 获取所有算法名称，并排除不适合性能测试的算法
         List<String> algos = AlgorithmRegistry.getAllAlgorithmNames().stream()
-                .filter(name -> !name.equals("猴子排序") && !name.equals("睡眠排序"))
+                .filter(name -> !name.equals("猴子排序") && !name.equals("睡眠排序") && !name.equals("珠排序"))
                 .collect(Collectors.toList());
 
         Task<List<PerformanceMetrics>> benchmarkTask = benchmarkService.createBenchmarkTask(benchmarkSize, dataType, algos);

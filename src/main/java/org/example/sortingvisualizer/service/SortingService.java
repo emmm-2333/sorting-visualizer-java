@@ -16,7 +16,16 @@ import javafx.scene.paint.Color;
  */
 public class SortingService {
 
+    /**
+     * 暂停标志，使用volatile关键字确保多线程环境下的可见性
+     * true表示排序暂停，false表示正常运行
+     */
     private volatile boolean paused;
+    
+    /**
+     * 暂停同步锁对象，用于线程间同步
+     * 通过该对象实现等待/通知机制
+     */
     private final Object pauseLock = new Object();
 
     /**
@@ -74,17 +83,17 @@ public class SortingService {
                     }
 
                     /**
-                     * 当设置某个位置的值时调用
+                     * 当设置(修改)某个位置的值时调用
                      * @param index 元素的索引
-     * @param value 要设置的值
+                     * @param value 要设置的值
                      */
                     @Override
                     public void onSet(int index, int value) {
                         Platform.runLater(() -> {
                             // 更新可视化面板上的数组显示
                             visualizerPane.updateArray(arrayToSort);
-                            // 高亮显示正在设置值的元素（绿色）
-                            visualizerPane.highlight(index, index, Color.GREEN);
+                            // 高亮显示正在设置值的元素（蓝色）
+                            visualizerPane.highlight(index, index, Color.BLUE);
                         });
                         // 暂停一段时间，以便用户可以看到可视化效果
                         sleep();
@@ -93,18 +102,30 @@ public class SortingService {
                     /**
                      * 暂停方法，根据delaySupplier提供的延迟时间暂停线程
                      */
+
                     private void sleep() {
                         try {
+                            // 检查是否处于暂停状态，如果是则等待直到恢复
                             waitIfPaused();
+                            // 根据delaySupplier提供的延迟时间进行休眠，控制排序速度
                             Thread.sleep(delaySupplier.getAsLong());
                         } catch (InterruptedException e) {
+                            // 恢复线程的中断状态，确保中断信号不丢失
                             Thread.currentThread().interrupt();
                         }
                     }
 
+                    /**
+                     * 检查排序是否处于暂停状态，如果是则等待直到恢复
+                     * 使用pauseLock对象进行同步，确保线程安全
+                     * 
+                     * @throws InterruptedException 当线程在等待期间被中断时抛出
+                     */
                     private void waitIfPaused() throws InterruptedException {
                         synchronized (pauseLock) {
+                            // 当paused标志为true时，持续等待
                             while (paused) {
+                                // 释放锁并进入等待状态，直到其他线程调用notify/notifyAll
                                 pauseLock.wait();
                             }
                         }
@@ -118,17 +139,31 @@ public class SortingService {
         };
     }
 
+    /**
+     * 暂停排序过程
+     * 将paused标志设置为true，使排序在下一步骤时进入等待状态
+     */
     public void pause() {
         paused = true;
     }
 
+    /**
+     * 恢复排序过程
+     * 设置paused标志为false，并通知所有等待的线程继续执行
+     */
     public void resume() {
         synchronized (pauseLock) {
             paused = false;
+            // 唤醒所有在pauseLock上等待的线程
             pauseLock.notifyAll();
         }
     }
 
+    /**
+     * 检查排序是否处于暂停状态
+     * 
+     * @return true表示暂停中，false表示运行中
+     */
     public boolean isPaused() {
         return paused;
     }
