@@ -1,21 +1,39 @@
 package org.example.sortingvisualizer.controller;
 
-import javafx.concurrent.Task;
-import javafx.fxml.FXML;
-import javafx.scene.control.*;
-import javafx.scene.layout.BorderPane;
+import java.io.File;
+import java.io.IOException;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import org.example.sortingvisualizer.algorithm.AlgorithmRegistry;
 import org.example.sortingvisualizer.model.PerformanceMetrics;
 import org.example.sortingvisualizer.service.BenchmarkService;
+import org.example.sortingvisualizer.service.DataInputService;
 import org.example.sortingvisualizer.service.SortingService;
 import org.example.sortingvisualizer.util.DataGenerator;
 import org.example.sortingvisualizer.view.VisualizerPane;
+
+import javafx.concurrent.Task;
+import javafx.fxml.FXML;
 import javafx.scene.chart.BarChart;
 import javafx.scene.chart.CategoryAxis;
 import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.XYChart;
-import java.util.List;
-import java.util.stream.Collectors;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.Slider;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
+import javafx.scene.layout.BorderPane;
+import javafx.stage.FileChooser;
+import javafx.stage.Window;
 
 public class MainController {
 
@@ -41,6 +59,18 @@ public class MainController {
     private Button benchmarkButton;
 
     @FXML
+    private TextField customDataField;
+
+    @FXML
+    private Button showDataButton;
+
+    @FXML
+    private Button loadFileButton;
+
+    @FXML
+    private CheckBox showValuesCheckbox;
+
+    @FXML
     private Slider speedSlider;
 
     @FXML
@@ -51,6 +81,7 @@ public class MainController {
 
     private final SortingService sortingService = new SortingService();
     private final BenchmarkService benchmarkService = new BenchmarkService();
+    private final DataInputService dataInputService = new DataInputService();
 
     // 动画延迟 (毫秒)
     private long delay = 50;
@@ -81,6 +112,11 @@ public class MainController {
 
         // 初始生成数据
         onGenerateData();
+
+        // 标签显示切换
+        if (showValuesCheckbox != null) {
+            showValuesCheckbox.selectedProperty().addListener((obs, ov, nv) -> visualizerPane.setShowLabels(nv));
+        }
     }
 
     @FXML
@@ -117,6 +153,50 @@ public class MainController {
 
         visualizerPane.setArray(currentArray);
         statusLabel.setText("数据已生成 (" + type + ")，准备排序。");
+    }
+
+    @FXML
+    private void onShowData() {
+        String input = customDataField != null ? customDataField.getText() : null;
+        try {
+            int[] arr = dataInputService.parseInputString(input);
+            currentArray = arr;
+            if (rootPane.getCenter() != visualizerPane) {
+                rootPane.setCenter(visualizerPane);
+            }
+            visualizerPane.setArray(currentArray);
+            statusLabel.setText("已显示自定义数据，数量：" + currentArray.length);
+        } catch (IllegalArgumentException ex) {
+            Alert alert = new Alert(Alert.AlertType.ERROR, ex.getMessage(), ButtonType.OK);
+            alert.setHeaderText("解析失败");
+            alert.showAndWait();
+        }
+    }
+
+    @FXML
+    private void onLoadFile() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("选择数据文件");
+        chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("文本文件", "*.txt", "*.csv"),
+                new FileChooser.ExtensionFilter("所有文件", "*.*")
+        );
+        Window win = rootPane.getScene() != null ? rootPane.getScene().getWindow() : null;
+        File file = chooser.showOpenDialog(win);
+        if (file == null) return;
+        try {
+            int[] arr = dataInputService.loadFromFile(file);
+            currentArray = arr;
+            if (rootPane.getCenter() != visualizerPane) {
+                rootPane.setCenter(visualizerPane);
+            }
+            visualizerPane.setArray(currentArray);
+            statusLabel.setText("已从文件加载数据，数量：" + currentArray.length);
+        } catch (IOException | IllegalArgumentException ex) {
+            Alert alert = new Alert(Alert.AlertType.ERROR, ex.getMessage(), ButtonType.OK);
+            alert.setHeaderText("读取失败");
+            alert.showAndWait();
+        }
     }
 
     @FXML
@@ -271,5 +351,9 @@ public class MainController {
         algorithmComboBox.setDisable(disabled);
         dataSizeField.setDisable(disabled);
         dataTypeComboBox.setDisable(disabled);
+        if (showDataButton != null) showDataButton.setDisable(disabled);
+        if (loadFileButton != null) loadFileButton.setDisable(disabled);
+        if (customDataField != null) customDataField.setDisable(disabled);
+        if (showValuesCheckbox != null) showValuesCheckbox.setDisable(disabled);
     }
 }

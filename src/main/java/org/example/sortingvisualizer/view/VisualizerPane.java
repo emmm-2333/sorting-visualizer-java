@@ -3,6 +3,8 @@ package org.example.sortingvisualizer.view;
 import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
+import javafx.scene.text.Font;
+import javafx.scene.text.Text;
 
 /**
  * 排序可视化面板
@@ -12,6 +14,7 @@ public class VisualizerPane extends Pane {
 
     private int[] array;
     private static final int BAR_GAP = 0; // 取消固定间隙，密集时更美观
+    private boolean showLabels = false;
 
     // 颜色常量
     private static final Color COLOR_DEFAULT = Color.web("#7db3ff");
@@ -48,6 +51,11 @@ public class VisualizerPane extends Pane {
 
     public void updateArray(int[] newArray) {
         this.array = (newArray == null) ? new int[0] : newArray.clone();
+        draw();
+    }
+
+    public void setShowLabels(boolean show) {
+        this.showLabels = show;
         draw();
     }
 
@@ -103,6 +111,17 @@ public class VisualizerPane extends Pane {
             }
 
             this.getChildren().add(rect);
+
+            if (showLabels && barWidth >= 16) {
+                Text label = new Text(String.valueOf(v));
+                label.setFill(Color.web("#333333"));
+                label.setFont(Font.font(11));
+                double labelX = x + 2;
+                double labelY = y - 2;
+                label.setX(labelX);
+                label.setY(Math.max(labelY, 8));
+                this.getChildren().add(label);
+            }
         }
     }
 }
