@@ -59,6 +59,9 @@ public class MainController {
     private Button benchmarkButton;
 
     @FXML
+    private Button pauseButton;
+
+    @FXML
     private TextField customDataField;
 
     @FXML
@@ -82,6 +85,8 @@ public class MainController {
     private final SortingService sortingService = new SortingService();
     private final BenchmarkService benchmarkService = new BenchmarkService();
     private final DataInputService dataInputService = new DataInputService();
+
+    private Task<Void> currentSortTask;
 
     // 动画延迟 (毫秒)
     private long delay = 50;
@@ -116,6 +121,10 @@ public class MainController {
         // 标签显示切换
         if (showValuesCheckbox != null) {
             showValuesCheckbox.selectedProperty().addListener((obs, ov, nv) -> visualizerPane.setShowLabels(nv));
+        }
+
+        if (pauseButton != null) {
+            pauseButton.setDisable(true);
         }
     }
 
@@ -214,18 +223,50 @@ public class MainController {
         statusLabel.setText("正在使用 " + algoName + " 排序...");
 
         Task<Void> sortTask = sortingService.createSortTask(algoName, currentArray, visualizerPane, () -> delay);
+        currentSortTask = sortTask;
+        if (pauseButton != null) {
+            pauseButton.setDisable(false);
+            pauseButton.setText("暂停");
+        }
 
         sortTask.setOnSucceeded(e -> {
             setControlsDisabled(false);
             statusLabel.setText("排序完成！");
+            if (pauseButton != null) {
+                pauseButton.setDisable(true);
+                pauseButton.setText("暂停");
+            }
+            sortingService.resume();
+            currentSortTask = null;
         });
 
         sortTask.setOnFailed(e -> {
             setControlsDisabled(false);
             statusLabel.setText("排序失败: " + sortTask.getException().getMessage());
+            if (pauseButton != null) {
+                pauseButton.setDisable(true);
+                pauseButton.setText("暂停");
+            }
+            sortingService.resume();
+            currentSortTask = null;
         });
 
         new Thread(sortTask).start();
+    }
+
+    @FXML
+    private void onPauseResume() {
+        if (currentSortTask == null || !currentSortTask.isRunning()) return;
+
+        if (sortingService.isPaused()) {
+            sortingService.resume();
+            if (pauseButton != null) pauseButton.setText("暂停");
+            statusLabel.setText("继续排序...");
+        } else {
+            sortingService.pause();
+            if (pauseButton != null) pauseButton.setText("继续");
+            statusLabel.setText("已暂停，点击继续。");
+        }
     }
 
     @FXML

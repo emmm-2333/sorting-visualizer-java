@@ -25,6 +25,7 @@
                   <ComboBox fx:id="dataTypeComboBox" prefWidth="120.0" />
                   <Button fx:id="generateButton" mnemonicParsing="false" onAction="#onGenerateData" text="生成数据" />
                   <Button fx:id="sortButton" mnemonicParsing="false" onAction="#onSort" text="开始排序" />
+                  <Button fx:id="pauseButton" mnemonicParsing="false" onAction="#onPauseResume" text="暂停" disable="true" />
                   <Button fx:id="benchmarkButton" mnemonicParsing="false" onAction="#onBenchmark" text="性能比较" />
                </children>
                <padding>
