@@ -36,6 +36,9 @@ public class BubbleSort implements Sorter {
 
     @Override
     public String getName() {
+        // 返回算法的英文名称，用于算法标识和内部处理
+        // 注意：界面显示使用的是AlgorithmRegistry中注册的中文名称"冒泡排序"
+        // 该方法主要用于日志记录、调试和其他需要英文标识的场景
         return "Bubble Sort";
     }
 }
