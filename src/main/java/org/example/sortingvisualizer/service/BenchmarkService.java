@@ -21,7 +21,7 @@ public class BenchmarkService {
      * 创建基准测试任务
      * 
      * @param size 数据规模
-     * @param dataType 数据类型（如"有序数据"、"递序数据"等）
+    * @param dataType 数据类型（如"有序数据"、"逆序数据"等）
      * @param algorithmsToRun 要测试的算法名称列表
      * @return 返回一个Task对象，执行后返回性能测试结果列表
      */
@@ -89,7 +89,7 @@ public class BenchmarkService {
     private int[] generateData(int size, String type) {
         return switch (type) {
             case "有序数据" -> DataGenerator.generateSortedData(size);     // 生成已排序的数据
-            case "递序数据" -> DataGenerator.generateReversedData(size);   // 生成逆序数据
+            case "逆序数据" -> DataGenerator.generateReversedData(size);   // 生成逆序数据
             case "部分有序" -> DataGenerator.generateNearlySortedData(size); // 生成部分有序数据
             default -> DataGenerator.generateLinearShuffledData(size);      // 默认生成随机打乱的线性数据
         };
