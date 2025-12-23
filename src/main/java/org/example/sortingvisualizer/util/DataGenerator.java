@@ -35,7 +35,7 @@ public class DataGenerator {
             data[i] = i + 1;
         }
         // 随机交换几次
-        int swapCount = (int) (size * 0.05); // 5% 的乱序
+        int swapCount = (int) (size * 0.10); // 10% 的乱序
         for (int i = 0; i < swapCount; i++) {
             int idx1 = random.nextInt(size);
             int idx2 = random.nextInt(size);
