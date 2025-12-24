@@ -11,7 +11,7 @@
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 
-<BorderPane fx:id="rootPane" prefHeight="600.0" prefWidth="800.0" xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.example.sortingvisualizer.controller.MainController">
+<BorderPane fx:id="rootPane" prefHeight="800.0" prefWidth="1200.0" xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.example.sortingvisualizer.controller.MainController">
    <top>
       <VBox spacing="10.0" BorderPane.alignment="CENTER">
          <children>
@@ -26,6 +26,7 @@
                   <Button fx:id="generateButton" mnemonicParsing="false" onAction="#onGenerateData" text="生成数据" />
                   <Button fx:id="sortButton" mnemonicParsing="false" onAction="#onSort" text="开始排序" />
                   <Button fx:id="pauseButton" mnemonicParsing="false" onAction="#onPauseResume" text="暂停" disable="true" />
+                  <Button fx:id="exitSortButton" mnemonicParsing="false" onAction="#onExitSort" text="退出排序" disable="true" />
                   <Button fx:id="benchmarkButton" mnemonicParsing="false" onAction="#onBenchmark" text="性能比较" />
                </children>
                <padding>
@@ -47,7 +48,7 @@
             <HBox alignment="CENTER_LEFT" spacing="15.0">
                <children>
                   <Label text="动画速度:" />
-                  <Slider fx:id="speedSlider" min="1.0" value="50.0" />
+                  <Slider fx:id="speedSlider" min="1.0" max="100.0" value="50.0" />
                   <Label fx:id="statusLabel" text="就绪" />
                </children>
                <padding>

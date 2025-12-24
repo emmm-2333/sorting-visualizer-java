@@ -1,12 +1,24 @@
 package org.example.sortingvisualizer.algorithm;
 
-import org.example.sortingvisualizer.algorithm.impl.*;
-import org.example.sortingvisualizer.model.AlgorithmInfo;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.example.sortingvisualizer.algorithm.impl.BeadSort;
+import org.example.sortingvisualizer.algorithm.impl.BogoSort;
+import org.example.sortingvisualizer.algorithm.impl.BubbleSort;
+import org.example.sortingvisualizer.algorithm.impl.BucketSort;
+import org.example.sortingvisualizer.algorithm.impl.CountingSort;
+import org.example.sortingvisualizer.algorithm.impl.HeapSort;
+import org.example.sortingvisualizer.algorithm.impl.InsertionSort;
+import org.example.sortingvisualizer.algorithm.impl.MergeSort;
+import org.example.sortingvisualizer.algorithm.impl.QuickSort;
+import org.example.sortingvisualizer.algorithm.impl.RadixSort;
+import org.example.sortingvisualizer.algorithm.impl.SelectionSort;
+import org.example.sortingvisualizer.algorithm.impl.ShellSort;
+import org.example.sortingvisualizer.algorithm.impl.SleepSort;
+import org.example.sortingvisualizer.model.AlgorithmInfo;
 
 /**
  * 算法注册表，管理所有排序算法及其元数据
@@ -22,6 +34,7 @@ public class AlgorithmRegistry {
         register(new MergeSort(), new AlgorithmInfo("归并排序", "O(n log n)", "O(n log n)", "O(n log n)", "O(n)", true));
         register(new HeapSort(), new AlgorithmInfo("堆排序", "O(n log n)", "O(n log n)", "O(n log n)", "O(1)", false));
         register(new InsertionSort(), new AlgorithmInfo("插入排序", "O(n)", "O(n²)", "O(n²)", "O(1)", true));
+        register(new ShellSort(), new AlgorithmInfo("希尔排序", "O(n log n)", "O(n^1.5)", "O(n²)", "O(1)", false));
         register(new SelectionSort(), new AlgorithmInfo("选择排序", "O(n²)", "O(n²)", "O(n²)", "O(1)", false));
         register(new CountingSort(), new AlgorithmInfo("计数排序", "O(n+k)", "O(n+k)", "O(n+k)", "O(k)", true));
         register(new BucketSort(), new AlgorithmInfo("桶排序", "O(n+k)", "O(n+k)", "O(n²)", "O(n)", true));

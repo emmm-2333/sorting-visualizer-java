@@ -87,6 +87,10 @@ public class MainController {
     @FXML
     private Button pauseButton;
 
+    /** 退出排序按钮：在排序过程中立即终止并恢复到排序前界面。 */
+    @FXML
+    private Button exitSortButton;
+
     /** 用户自定义数据输入框（例如 1,2,3 或 1 2 3），解析失败会弹框。 */
     @FXML
     private TextField customDataField;
@@ -127,8 +131,38 @@ public class MainController {
     /** 当前排序任务引用：用于判断是否可暂停/继续，以及在结束时清理。 */
     private Task<Void> currentSortTask;
 
+    /** 启动排序前的数组快照：用于“退出排序”后恢复。 */
+    private int[] arrayBeforeSort;
+
+    /** 标记本次取消是否由用户点击“退出排序”触发。 */
+    private boolean exitRequestedByUser;
+
     /** 动画每一步的延迟（毫秒）。会被 speedSlider 动态更新。 */
     private long delay = 50;
+
+    private long mapSpeedToDelay(double sliderValue) {
+        // 非线性映射：滑块越大，越快（delay 越小）
+        // 目标范围：最快 1ms，最慢 1000ms
+        final double minDelay = 1.0;
+        final double maxDelay = 1000.0;
+
+        double min = (speedSlider != null) ? speedSlider.getMin() : 1.0;
+        double max = (speedSlider != null) ? speedSlider.getMax() : 100.0;
+        if (max <= min) {
+            return 50;
+        }
+
+        double t = (sliderValue - min) / (max - min); // 0..1
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+
+        // 指数曲线：低延迟区更“细腻”，高延迟区跨度更大
+        double delayMs = minDelay * Math.pow(maxDelay / minDelay, 1.0 - t);
+        long rounded = Math.round(delayMs);
+        if (rounded < 1) return 1;
+        if (rounded > 1000) return 1000;
+        return rounded;
+    }
 
     @FXML
     public void initialize() {
@@ -149,10 +183,11 @@ public class MainController {
         dataTypeComboBox.getSelectionModel().selectFirst();
 
         // 4) 速度滑块监听：滑块值越大，延迟越小（速度越快）。
-        //    当前映射假设 slider 范围为 1-100；最小延迟 1ms，最大约 100ms。
+        //    非线性指数映射：最快 1ms，最慢 1000ms。
         speedSlider.valueProperty().addListener((obs, oldVal, newVal) ->
-                delay = (long) (100 - newVal.doubleValue()) + 1
+            delay = mapSpeedToDelay(newVal.doubleValue())
         );
+        delay = mapSpeedToDelay(speedSlider.getValue());
 
         // 5) 初始生成一组数据，保证一启动就有可视化内容。
         onGenerateData();
@@ -166,6 +201,11 @@ public class MainController {
         // 7) 暂停按钮初始禁用：只有排序任务启动后才允许点击。
         if (pauseButton != null) {
             pauseButton.setDisable(true);
+        }
+
+        // 8) 退出排序按钮初始禁用：只有排序任务启动后才允许点击。
+        if (exitSortButton != null) {
+            exitSortButton.setDisable(true);
         }
     }
 
@@ -251,7 +291,6 @@ public class MainController {
         if (file == null) return; // 用户取消
 
         try {
-            // 直接赋值，避免冗余局部变量
             currentArray = dataInputService.loadFromFile(file);
 
             if (rootPane.getCenter() != visualizerPane) {
@@ -271,6 +310,10 @@ public class MainController {
     private void onSort() {
         // 前置条件：必须先有数据
         if (currentArray == null) return;
+
+        // 保存排序前快照，用于“退出排序”恢复
+        arrayBeforeSort = currentArray.clone();
+        exitRequestedByUser = false;
 
         // 启动排序动画前，确保当前在可视化面板
         if (rootPane.getCenter() != visualizerPane) {
@@ -295,6 +338,11 @@ public class MainController {
             pauseButton.setText("暂停");
         }
 
+        // 排序开始后才允许退出
+        if (exitSortButton != null) {
+            exitSortButton.setDisable(false);
+        }
+
         // 任务成功：恢复 UI，清理任务引用，并兜底恢复暂停标志（避免下一次排序卡住）
         sortTask.setOnSucceeded(e -> {
             setControlsDisabled(false);
@@ -302,6 +350,9 @@ public class MainController {
             if (pauseButton != null) {
                 pauseButton.setDisable(true);
                 pauseButton.setText("暂停");
+            }
+            if (exitSortButton != null) {
+                exitSortButton.setDisable(true);
             }
             sortingService.resume();
             currentSortTask = null;
@@ -315,13 +366,67 @@ public class MainController {
                 pauseButton.setDisable(true);
                 pauseButton.setText("暂停");
             }
+            if (exitSortButton != null) {
+                exitSortButton.setDisable(true);
+            }
             sortingService.resume();
             currentSortTask = null;
+        });
+
+        // 任务取消（退出排序）：恢复 UI，并回到排序前数据
+        sortTask.setOnCancelled(e -> {
+            setControlsDisabled(false);
+
+            if (pauseButton != null) {
+                pauseButton.setDisable(true);
+                pauseButton.setText("暂停");
+            }
+            if (exitSortButton != null) {
+                exitSortButton.setDisable(true);
+            }
+
+            sortingService.resume();
+            currentSortTask = null;
+
+            if (exitRequestedByUser && arrayBeforeSort != null) {
+                currentArray = arrayBeforeSort.clone();
+                if (rootPane.getCenter() != visualizerPane) {
+                    rootPane.setCenter(visualizerPane);
+                }
+                visualizerPane.setArray(currentArray);
+                statusLabel.setText("已退出排序，已恢复到排序前数据。");
+            } else {
+                statusLabel.setText("排序已取消。");
+            }
+
+            exitRequestedByUser = false;
         });
 
         // 启动任务：这里直接 new Thread 启动后台线程。
         // TODO(可扩展)：后续可用 ExecutorService 统一管理线程（命名线程、复用线程池、支持取消）。
         new Thread(sortTask).start();
+    }
+
+    @FXML
+    private void onExitSort() {
+        // 只允许退出“正在运行”的排序任务
+        if (currentSortTask == null || !currentSortTask.isRunning()) return;
+
+        exitRequestedByUser = true;
+        statusLabel.setText("正在退出排序...");
+
+        // 先解除暂停，避免排序线程卡在 wait 上无法结束
+        sortingService.requestCancel();
+
+        // 触发 Task 取消（会中断 sleep，并配合 SortingService 的协作式检查尽快退出）
+        currentSortTask.cancel();
+
+        if (pauseButton != null) {
+            pauseButton.setDisable(true);
+        }
+        if (exitSortButton != null) {
+            exitSortButton.setDisable(true);
+        }
     }
 
     @FXML
