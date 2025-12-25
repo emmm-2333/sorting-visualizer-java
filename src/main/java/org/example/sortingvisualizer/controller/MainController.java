@@ -143,22 +143,28 @@ public class MainController {
     private long mapSpeedToDelay(double sliderValue) {
         // 非线性映射：滑块越大，越快（delay 越小）
         // 目标范围：最快 1ms，最慢 1000ms
+        // 说明：这里返回的是“每一步动画的 sleep 时长”，并非排序耗时
         final double minDelay = 1.0;
         final double maxDelay = 1000.0;
 
         double min = (speedSlider != null) ? speedSlider.getMin() : 1.0;
         double max = (speedSlider != null) ? speedSlider.getMax() : 100.0;
         if (max <= min) {
+            // 防御：滑块范围异常时使用一个中等默认值
             return 50;
         }
 
         double t = (sliderValue - min) / (max - min); // 0..1
+        // 防御：避免滑块值超出范围导致映射出现负数/NaN
         if (t < 0) t = 0;
         if (t > 1) t = 1;
 
         // 指数曲线：低延迟区更“细腻”，高延迟区跨度更大
+        // 公式：delay = minDelay * (maxDelay/minDelay)^(1-t)
+        // t=0 -> maxDelay（最慢），t=1 -> minDelay（最快）
         double delayMs = minDelay * Math.pow(maxDelay / minDelay, 1.0 - t);
         long rounded = Math.round(delayMs);
+        // 最终收敛到 [1,1000]，避免极端值导致 UI 卡顿或过快看不清
         if (rounded < 1) return 1;
         if (rounded > 1000) return 1000;
         return rounded;
@@ -171,7 +177,7 @@ public class MainController {
         rootPane.setCenter(visualizerPane);
 
         // 2) 监听面板大小变化以触发重绘。
-        //    注意：这里重绘使用 currentArray（可能为 null），VisualizerPane 内部应自行做 null/空数组保护。
+        //    目的：窗口缩放时，柱子宽度/高度需要重新计算
         visualizerPane.widthProperty().addListener((obs, oldVal, newVal) -> visualizerPane.setArray(currentArray));
         visualizerPane.heightProperty().addListener((obs, oldVal, newVal) -> visualizerPane.setArray(currentArray));
 
@@ -187,6 +193,7 @@ public class MainController {
         speedSlider.valueProperty().addListener((obs, oldVal, newVal) ->
             delay = mapSpeedToDelay(newVal.doubleValue())
         );
+        // 初始化一次 delay（否则第一次排序仍可能用默认 50ms）
         delay = mapSpeedToDelay(speedSlider.getValue());
 
         // 5) 初始生成一组数据，保证一启动就有可视化内容。
@@ -239,7 +246,7 @@ public class MainController {
         // 根据数据类型选择生成策略。
         // 说明：这里生成的是“用于演示/排序”的 currentArray；benchmark 会另行生成，不复用该数组。
         switch (type) {
-            case "随机数据" -> currentArray = DataGenerator.generateLinearShuffledData(size);
+            case "随机数据" -> currentArray = DataGenerator.generateLinearShuffledData(size);//"->" 自动跳出，不会"贯穿"
             case "有序数据" -> currentArray = DataGenerator.generateSortedData(size);
             case "逆序数据" -> currentArray = DataGenerator.generateReversedData(size);
             case "部分有序" -> currentArray = DataGenerator.generateNearlySortedData(size);
@@ -258,6 +265,7 @@ public class MainController {
         String input = customDataField != null ? customDataField.getText() : null;
         try {
             // 直接赋值，避免冗余局部变量
+            // 说明：parseInputString 支持“逗号/空格”等常见分隔形式
             currentArray = dataInputService.parseInputString(input);
 
             // 可能在性能结果视图中，展示数据时强制回到可视化面板
@@ -271,7 +279,7 @@ public class MainController {
             // 解析失败时弹框提示（不让异常打断 UI）
             Alert alert = new Alert(Alert.AlertType.ERROR, ex.getMessage(), ButtonType.OK);
             alert.setHeaderText("解析失败");
-            alert.showAndWait();
+            alert.showAndWait();//阻塞当前线程，直到用户关闭对话框
         }
     }
 
@@ -280,6 +288,7 @@ public class MainController {
         // 文件选择 + 解析：支持 txt/csv；具体解析逻辑由 DataInputService 负责。
         FileChooser chooser = new FileChooser();
         chooser.setTitle("选择数据文件");
+        // 过滤器只是 UI 便利，不影响最终读取（用户仍可选择 *.*）
         chooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("文本文件", "*.txt", "*.csv"),
                 new FileChooser.ExtensionFilter("所有文件", "*.*")
@@ -288,6 +297,7 @@ public class MainController {
         // Scene 可能尚未就绪（理论上 initialize 后一般就绪，但这里仍做防御）
         Window win = rootPane.getScene() != null ? rootPane.getScene().getWindow() : null;
         File file = chooser.showOpenDialog(win);
+        // 用户点“取消”时 file 为 null，直接返回即可
         if (file == null) return; // 用户取消
 
         try {
@@ -312,6 +322,7 @@ public class MainController {
         if (currentArray == null) return;
 
         // 保存排序前快照，用于“退出排序”恢复
+        // 注意：必须 clone()，避免排序过程中原数组被就地修改导致快照失效
         arrayBeforeSort = currentArray.clone();
         exitRequestedByUser = false;
 
@@ -321,6 +332,7 @@ public class MainController {
         }
 
         String algoName = algorithmComboBox.getValue();
+        // algoName 为中文显示名；SortingService 内部会通过 AlgorithmRegistry 找到对应 Sorter
 
         // 排序过程中禁用输入控件：防止用户生成新数组/切换算法/启动 benchmark 造成并发与状态错乱。
         setControlsDisabled(true);
@@ -361,6 +373,7 @@ public class MainController {
         // 任务失败：恢复 UI，并显示错误原因
         sortTask.setOnFailed(e -> {
             setControlsDisabled(false);
+            // 注意：异常来自后台线程，需在这里给用户一个可读提示
             statusLabel.setText("排序失败: " + sortTask.getException().getMessage());
             if (pauseButton != null) {
                 pauseButton.setDisable(true);
@@ -373,22 +386,30 @@ public class MainController {
             currentSortTask = null;
         });
 
-        // 任务取消（退出排序）：恢复 UI，并回到排序前数据
+        // 设置任务取消时的处理逻辑
         sortTask.setOnCancelled(e -> {
+            // 恢复所有被禁用的控件状态
             setControlsDisabled(false);
 
+            // 重置暂停按钮状态
             if (pauseButton != null) {
+                // 禁用暂停按钮
                 pauseButton.setDisable(true);
+                // 恢复按钮文本为"暂停"
                 pauseButton.setText("暂停");
             }
+            // 禁用退出排序按钮
             if (exitSortButton != null) {
                 exitSortButton.setDisable(true);
             }
 
+            // 恢复排序服务的运行状态（以防在暂停状态被取消）
             sortingService.resume();
+            // 清空当前任务引用，以便垃圾回收
             currentSortTask = null;
 
             if (exitRequestedByUser && arrayBeforeSort != null) {
+                // 用户主动“退出排序”：恢复排序前数据，让界面回到“开始排序前”的状态
                 currentArray = arrayBeforeSort.clone();
                 if (rootPane.getCenter() != visualizerPane) {
                     rootPane.setCenter(visualizerPane);
@@ -396,6 +417,7 @@ public class MainController {
                 visualizerPane.setArray(currentArray);
                 statusLabel.setText("已退出排序，已恢复到排序前数据。");
             } else {
+                // 其他原因导致取消（例如外部调用 cancel）
                 statusLabel.setText("排序已取消。");
             }
 
@@ -403,7 +425,7 @@ public class MainController {
         });
 
         // 启动任务：这里直接 new Thread 启动后台线程。
-        // TODO(可扩展)：后续可用 ExecutorService 统一管理线程（命名线程、复用线程池、支持取消）。
+        // 说明：JavaFX 的 Task 需要在非 FX 线程运行；UI 更新由 Task/Service 内部用 Platform.runLater 完成
         new Thread(sortTask).start();
     }
 
@@ -416,6 +438,7 @@ public class MainController {
         statusLabel.setText("正在退出排序...");
 
         // 先解除暂停，避免排序线程卡在 wait 上无法结束
+        // requestCancel 会让 SortingService 退出等待/睡眠并尽快结束
         sortingService.requestCancel();
 
         // 触发 Task 取消（会中断 sleep，并配合 SortingService 的协作式检查尽快退出）
@@ -440,6 +463,7 @@ public class MainController {
             if (pauseButton != null) pauseButton.setText("暂停");
             statusLabel.setText("继续排序...");
         } else {
+            // 暂停只影响“动画排序”，不影响 benchmark
             sortingService.pause();
             if (pauseButton != null) pauseButton.setText("继续");
             statusLabel.setText("已暂停，点击继续。");
@@ -470,6 +494,8 @@ public class MainController {
                 .filter(name -> !name.equals("猴子排序") && !name.equals("睡眠排序") && !name.equals("珠排序"))
                 .collect(Collectors.toList());
 
+        // 说明：benchmarkTask 运行在后台线程，完成后通过 setOnSucceeded 切回 UI 展示图表/表格
+
         Task<List<PerformanceMetrics>> benchmarkTask = benchmarkService.createBenchmarkTask(benchmarkSize, dataType, algos);
 
         benchmarkTask.setOnSucceeded(e -> {
@@ -481,7 +507,6 @@ public class MainController {
         benchmarkTask.setOnFailed(e -> {
             setControlsDisabled(false);
             statusLabel.setText("性能比较失败: " + benchmarkTask.getException().getMessage());
-            // TODO(可扩展)：替换为日志系统（如 slf4j），统一异常输出。
             benchmarkTask.getException().printStackTrace();
         });
 
@@ -491,7 +516,6 @@ public class MainController {
     private void showBenchmarkResults(List<PerformanceMetrics> metrics, int size, String type) {
         // 将中心视图切换为 TabPane：展示时间图/内存图/表格。
         // Tab 标题携带 size/type，便于用户确认本次 benchmark 的参数。
-        // TODO(可扩展)：增加“返回可视化”按钮/入口，或保留当前数组以便继续演示。
         TabPane tabPane = new TabPane();
 
         String typeText = (type == null || type.isBlank()) ? "数据" : type;
@@ -512,6 +536,7 @@ public class MainController {
 
     private BarChart<String, Number> createTimeChart(List<PerformanceMetrics> metrics) {
         // 柱状图：X=算法名，Y=耗时(毫秒)
+        // 注意：JavaFX 图表会基于数据自动计算坐标轴刻度
         CategoryAxis xAxis = new CategoryAxis();
         xAxis.setLabel("排序算法");
         NumberAxis yAxis = new NumberAxis();
@@ -583,6 +608,7 @@ public class MainController {
 
     private void setControlsDisabled(boolean disabled) {
         // 统一的 UI 状态控制：排序/benchmark 运行时禁用关键控件，避免并发操作导致状态不一致。
+        // 注意：这里不处理 pause/exit，因为它们的可用性由 onSort/onExitSort/onPauseResume 更精确地控制
         generateButton.setDisable(disabled);
         sortButton.setDisable(disabled);
         benchmarkButton.setDisable(disabled);
