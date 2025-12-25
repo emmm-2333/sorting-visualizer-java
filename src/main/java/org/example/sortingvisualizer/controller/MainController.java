@@ -6,13 +6,20 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import org.example.sortingvisualizer.algorithm.AlgorithmRegistry;
+import org.example.sortingvisualizer.algorithm.Sorter;
 import org.example.sortingvisualizer.model.PerformanceMetrics;
 import org.example.sortingvisualizer.service.BenchmarkService;
 import org.example.sortingvisualizer.service.DataInputService;
 import org.example.sortingvisualizer.service.SortingService;
+import org.example.sortingvisualizer.service.StepRecordingService;
+import org.example.sortingvisualizer.step.RecordedSort;
+import org.example.sortingvisualizer.step.SortOperation;
+import org.example.sortingvisualizer.step.SortOperationType;
+import org.example.sortingvisualizer.step.StepPlayer;
 import org.example.sortingvisualizer.util.DataGenerator;
 import org.example.sortingvisualizer.view.VisualizerPane;
 
+import javafx.animation.PauseTransition;
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.chart.BarChart;
@@ -32,8 +39,10 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.paint.Color;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
+import javafx.util.Duration;
 
 /**
  * 主界面控制器（Controller）。
@@ -87,6 +96,14 @@ public class MainController {
     @FXML
     private Button pauseButton;
 
+    /** 上一步：基于录制回放模式。 */
+    @FXML
+    private Button prevStepButton;
+
+    /** 下一步：基于录制回放模式。 */
+    @FXML
+    private Button nextStepButton;
+
     /** 退出排序按钮：在排序过程中立即终止并恢复到排序前界面。 */
     @FXML
     private Button exitSortButton;
@@ -115,6 +132,14 @@ public class MainController {
     @FXML
     private Label statusLabel;
 
+    /** 步骤计数显示：例如 123/456。 */
+    @FXML
+    private Label stepLabel;
+
+    /** 当前操作回显：例如“交换 a[3]=4 与 a[5]=7”。 */
+    @FXML
+    private Label operationLabel;
+
     /** 可视化绘制面板（柱状图动画都在这里画）。 */
     private VisualizerPane visualizerPane;
 
@@ -123,6 +148,9 @@ public class MainController {
 
     /** 排序动画服务：创建排序 Task、处理暂停/恢复协议、在 UI 线程刷新可视化。 */
     private final SortingService sortingService = new SortingService();
+
+    /** 录制服务：把排序算法回调转换成可回放/可撤销的操作序列。 */
+    private final StepRecordingService stepRecordingService = new StepRecordingService();
     /** 性能比较服务：批量运行算法并统计耗时/内存、输出 {@link PerformanceMetrics} 列表。 */
     private final BenchmarkService benchmarkService = new BenchmarkService();
     /** 输入服务：解析自定义输入字符串、读取文件并转成 int[]。 */
@@ -130,6 +158,18 @@ public class MainController {
 
     /** 当前排序任务引用：用于判断是否可暂停/继续，以及在结束时清理。 */
     private Task<Void> currentSortTask;
+
+    /** 当前录制任务引用：用于“退出排序”时取消。 */
+    private Task<RecordedSort> currentRecordTask;
+
+    /** 回放播放器：支持 next/prev（apply/undo）。 */
+    private StepPlayer stepPlayer;
+
+    /** 回放定时器：使用 PauseTransition 方便动态调速。 */
+    private PauseTransition playbackTimer;
+
+    /** 是否正在自动回放。 */
+    private boolean playbackPlaying;
 
     /** 启动排序前的数组快照：用于“退出排序”后恢复。 */
     private int[] arrayBeforeSort;
@@ -213,6 +253,20 @@ public class MainController {
         // 8) 退出排序按钮初始禁用：只有排序任务启动后才允许点击。
         if (exitSortButton != null) {
             exitSortButton.setDisable(true);
+        }
+
+        if (prevStepButton != null) {
+            prevStepButton.setDisable(true);
+        }
+        if (nextStepButton != null) {
+            nextStepButton.setDisable(true);
+        }
+
+        if (stepLabel != null) {
+            stepLabel.setText("步骤: 0/0");
+        }
+        if (operationLabel != null) {
+            operationLabel.setText("-");
         }
     }
 
@@ -338,78 +392,69 @@ public class MainController {
         setControlsDisabled(true);
         statusLabel.setText("正在使用 " + algoName + " 排序...");
 
-        // 创建后台排序任务：
-        // - SortingService 内部负责：获取算法实例、执行排序、按步骤回调更新 VisualizerPane
-        // - 这里传入 () -> delay 是关键：允许排序过程动态调速（滑块改变无需重启任务）
-        Task<Void> sortTask = sortingService.createSortTask(algoName, currentArray, visualizerPane, () -> delay);
-        currentSortTask = sortTask;
-
-        // 排序开始后才允许暂停/继续
-        if (pauseButton != null) {
-            pauseButton.setDisable(false);
-            pauseButton.setText("暂停");
-        }
-
-        // 排序开始后才允许退出
+        // 录制/回放期间允许“退出排序”用于恢复到排序前
         if (exitSortButton != null) {
             exitSortButton.setDisable(false);
         }
 
-        // 任务成功：恢复 UI，清理任务引用，并兜底恢复暂停标志（避免下一次排序卡住）
-        sortTask.setOnSucceeded(e -> {
-            setControlsDisabled(false);
-            statusLabel.setText("排序完成！");
+        // 录制 + 回放模式：先把操作序列录出来，再支持“上一步/下一步/暂停/继续”。
+        stopPlaybackIfNeeded();
+
+        if (pauseButton != null) {
+            pauseButton.setDisable(true);
+            pauseButton.setText("暂停");
+        }
+        if (prevStepButton != null) prevStepButton.setDisable(true);
+        if (nextStepButton != null) nextStepButton.setDisable(true);
+        if (stepLabel != null) stepLabel.setText("步骤: 0/0");
+        if (operationLabel != null) operationLabel.setText("正在准备步骤... ");
+
+        currentRecordTask = new Task<>() {
+            @Override
+            protected RecordedSort call() {
+                Sorter sorter = AlgorithmRegistry.getSorter(algoName);
+                if (sorter == null) {
+                    throw new IllegalArgumentException("找不到算法：" + algoName);
+                }
+                return stepRecordingService.record(algoName, sorter, currentArray);
+            }
+        };
+
+        // 录制完成：初始化播放器并开始回放
+        currentRecordTask.setOnSucceeded(e -> {
+            RecordedSort recorded = currentRecordTask.getValue();
+            stepPlayer = new StepPlayer(recorded.initialArray(), recorded.operations());
+
+            // 初始状态
+            visualizerPane.setArray(recorded.initialArray());
+            updateStepUi(null);
+
             if (pauseButton != null) {
-                pauseButton.setDisable(true);
+                pauseButton.setDisable(false);
                 pauseButton.setText("暂停");
             }
-            if (exitSortButton != null) {
-                exitSortButton.setDisable(true);
-            }
-            sortingService.resume();
-            currentSortTask = null;
+            if (exitSortButton != null) exitSortButton.setDisable(false);
+            if (prevStepButton != null) prevStepButton.setDisable(true);
+            if (nextStepButton != null) nextStepButton.setDisable(!stepPlayer.hasNext());
+
+            statusLabel.setText("回放中：" + algoName);
+            startPlayback();
+            currentRecordTask = null;
         });
 
-        // 任务失败：恢复 UI，并显示错误原因
-        sortTask.setOnFailed(e -> {
+        currentRecordTask.setOnFailed(e -> {
             setControlsDisabled(false);
-            // 注意：异常来自后台线程，需在这里给用户一个可读提示
-            statusLabel.setText("排序失败: " + sortTask.getException().getMessage());
-            if (pauseButton != null) {
-                pauseButton.setDisable(true);
-                pauseButton.setText("暂停");
-            }
-            if (exitSortButton != null) {
-                exitSortButton.setDisable(true);
-            }
-            sortingService.resume();
-            currentSortTask = null;
+            Throwable ex = currentRecordTask.getException();
+            statusLabel.setText("准备失败: " + (ex == null ? "未知错误" : ex.getMessage()));
+            resetStepUi();
+            currentRecordTask = null;
         });
 
-        // 设置任务取消时的处理逻辑
-        sortTask.setOnCancelled(e -> {
-            // 恢复所有被禁用的控件状态
+        currentRecordTask.setOnCancelled(e -> {
             setControlsDisabled(false);
-
-            // 重置暂停按钮状态
-            if (pauseButton != null) {
-                // 禁用暂停按钮
-                pauseButton.setDisable(true);
-                // 恢复按钮文本为"暂停"
-                pauseButton.setText("暂停");
-            }
-            // 禁用退出排序按钮
-            if (exitSortButton != null) {
-                exitSortButton.setDisable(true);
-            }
-
-            // 恢复排序服务的运行状态（以防在暂停状态被取消）
-            sortingService.resume();
-            // 清空当前任务引用，以便垃圾回收
-            currentSortTask = null;
+            resetStepUi();
 
             if (exitRequestedByUser && arrayBeforeSort != null) {
-                // 用户主动“退出排序”：恢复排序前数据，让界面回到“开始排序前”的状态
                 currentArray = arrayBeforeSort.clone();
                 if (rootPane.getCenter() != visualizerPane) {
                     rootPane.setCenter(visualizerPane);
@@ -417,57 +462,175 @@ public class MainController {
                 visualizerPane.setArray(currentArray);
                 statusLabel.setText("已退出排序，已恢复到排序前数据。");
             } else {
-                // 其他原因导致取消（例如外部调用 cancel）
-                statusLabel.setText("排序已取消。");
+                statusLabel.setText("已取消。");
             }
-
             exitRequestedByUser = false;
+            currentRecordTask = null;
         });
 
-        // 启动任务：这里直接 new Thread 启动后台线程。
-        // 说明：JavaFX 的 Task 需要在非 FX 线程运行；UI 更新由 Task/Service 内部用 Platform.runLater 完成
-        new Thread(sortTask).start();
+        new Thread(currentRecordTask).start();
     }
 
     @FXML
     private void onExitSort() {
-        // 只允许退出“正在运行”的排序任务
-        if (currentSortTask == null || !currentSortTask.isRunning()) return;
-
         exitRequestedByUser = true;
-        statusLabel.setText("正在退出排序...");
+        statusLabel.setText("正在退出...");
 
-        // 先解除暂停，避免排序线程卡在 wait 上无法结束
-        // requestCancel 会让 SortingService 退出等待/睡眠并尽快结束
-        sortingService.requestCancel();
+        stopPlaybackIfNeeded();
 
-        // 触发 Task 取消（会中断 sleep，并配合 SortingService 的协作式检查尽快退出）
-        currentSortTask.cancel();
-
-        if (pauseButton != null) {
-            pauseButton.setDisable(true);
+        if (currentRecordTask != null && currentRecordTask.isRunning()) {
+            currentRecordTask.cancel();
         }
-        if (exitSortButton != null) {
-            exitSortButton.setDisable(true);
+
+        // 如果没有录制任务在跑，直接恢复 UI
+        if (arrayBeforeSort != null) {
+            currentArray = arrayBeforeSort.clone();
+            if (rootPane.getCenter() != visualizerPane) {
+                rootPane.setCenter(visualizerPane);
+            }
+            visualizerPane.setArray(currentArray);
         }
+
+        setControlsDisabled(false);
+        resetStepUi();
+
+        statusLabel.setText("已退出排序，已恢复到排序前数据。");
+        exitRequestedByUser = false;
     }
 
     @FXML
     private void onPauseResume() {
-        // 只允许暂停“正在运行”的排序任务
-        if (currentSortTask == null || !currentSortTask.isRunning()) return;
+        // 回放模式：暂停/继续 Timeline
+        if (stepPlayer == null) return;
 
-        // 暂停协议由 SortingService 实现：排序线程在每一步之间检查 paused 标志并等待/唤醒。
-        if (sortingService.isPaused()) {
-            sortingService.resume();
-            if (pauseButton != null) pauseButton.setText("暂停");
-            statusLabel.setText("继续排序...");
+        if (playbackPlaying) {
+            pausePlayback();
+            statusLabel.setText("已暂停，支持上一步/下一步。");
         } else {
-            // 暂停只影响“动画排序”，不影响 benchmark
-            sortingService.pause();
-            if (pauseButton != null) pauseButton.setText("继续");
-            statusLabel.setText("已暂停，点击继续。");
+            startPlayback();
+            statusLabel.setText("继续回放...");
         }
+    }
+
+    @FXML
+    private void onPrevStep() {
+        if (stepPlayer == null) return;
+        pausePlayback();
+        SortOperation op = stepPlayer.prev();
+        updateStepUi(op);
+    }
+
+    @FXML
+    private void onNextStep() {
+        if (stepPlayer == null) return;
+        pausePlayback();
+        SortOperation op = stepPlayer.next();
+        updateStepUi(op);
+    }
+
+    private void startPlayback() {
+        if (stepPlayer == null) return;
+        playbackPlaying = true;
+        if (pauseButton != null) {
+            pauseButton.setText("暂停");
+        }
+        scheduleNextTick();
+    }
+
+    private void pausePlayback() {
+        playbackPlaying = false;
+        if (playbackTimer != null) {
+            playbackTimer.stop();
+            playbackTimer = null;
+        }
+        if (pauseButton != null) {
+            pauseButton.setText("继续");
+        }
+    }
+
+    private void stopPlaybackIfNeeded() {
+        pausePlayback();
+        stepPlayer = null;
+    }
+
+    private void scheduleNextTick() {
+        if (!playbackPlaying || stepPlayer == null) return;
+
+        playbackTimer = new PauseTransition(Duration.millis(delay));
+        playbackTimer.setOnFinished(evt -> {
+            if (!playbackPlaying || stepPlayer == null) return;
+
+            SortOperation op = stepPlayer.next();
+            updateStepUi(op);
+
+            if (stepPlayer.hasNext()) {
+                scheduleNextTick();
+            } else {
+                // 到头：停止回放，保持最终状态
+                pausePlayback();
+                if (pauseButton != null) {
+                    pauseButton.setDisable(true);
+                    pauseButton.setText("暂停");
+                }
+                if (exitSortButton != null) {
+                    exitSortButton.setDisable(true);
+                }
+                setControlsDisabled(false);
+                statusLabel.setText("排序完成！");
+            }
+        });
+        playbackTimer.play();
+    }
+
+    private void resetStepUi() {
+        pausePlayback();
+        if (pauseButton != null) {
+            pauseButton.setDisable(true);
+            pauseButton.setText("暂停");
+        }
+        if (exitSortButton != null) {
+            exitSortButton.setDisable(true);
+        }
+        if (prevStepButton != null) prevStepButton.setDisable(true);
+        if (nextStepButton != null) nextStepButton.setDisable(true);
+        if (stepLabel != null) stepLabel.setText("步骤: 0/0");
+        if (operationLabel != null) operationLabel.setText("-");
+    }
+
+    private void updateStepUi(SortOperation op) {
+        if (stepPlayer == null) {
+            if (stepLabel != null) stepLabel.setText("步骤: 0/0");
+            if (operationLabel != null) operationLabel.setText("-");
+            return;
+        }
+
+        int[] state = stepPlayer.currentArray();
+        if (op != null) {
+            visualizerPane.renderState(state, op.index1(), op.index2(), colorForOperation(op.type()));
+            if (operationLabel != null) {
+                operationLabel.setText(op.description(null));
+            }
+        } else {
+            visualizerPane.renderState(state, -1, -1, null);
+            if (operationLabel != null) {
+                operationLabel.setText("准备开始");
+            }
+        }
+
+        if (stepLabel != null) {
+            stepLabel.setText("步骤: " + stepPlayer.cursor() + "/" + stepPlayer.size());
+        }
+        if (prevStepButton != null) prevStepButton.setDisable(!stepPlayer.hasPrev());
+        if (nextStepButton != null) nextStepButton.setDisable(!stepPlayer.hasNext());
+    }
+
+    private Color colorForOperation(SortOperationType type) {
+        if (type == null) return null;
+        return switch (type) {
+            case COMPARE -> Color.web("#ff3b30");
+            case SWAP -> Color.web("#34c759");
+            case SET -> Color.web("#007aff");
+        };
     }
 
     @FXML

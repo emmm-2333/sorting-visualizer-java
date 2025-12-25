@@ -13,19 +13,19 @@ import javafx.scene.text.Text;
 public class VisualizerPane extends Pane {
 
     private int[] array;
-    private static final int BAR_GAP = 0; // 取消固定间隙，密集时更美观
+    private static final int BAR_GAP = 2;
     private boolean showLabels = false;
 
     // 颜色常量
     private static final Color COLOR_DEFAULT = Color.web("#7db3ff");
+    private static final Color COLOR_STROKE = Color.web("#e6e6e6");
 
     // 内边距
     private static final double PADDING_TOP = 10;
     private static final double PADDING_BOTTOM = 10;
 
     public VisualizerPane() {
-        // 初始设置：更简洁的浅色背景
-        this.setStyle("-fx-background-color: #fafafa; -fx-border-color: #e6e6e6;");
+        this.getStyleClass().add("visualizer-pane");
     }
 
     /**
@@ -52,6 +52,14 @@ public class VisualizerPane extends Pane {
     public void updateArray(int[] newArray) {
         this.array = (newArray == null) ? new int[0] : newArray.clone();
         draw();
+    }
+
+    /**
+     * 一次性渲染数组与高亮（避免 updateArray + highlight 的双重重绘）。
+     */
+    public void renderState(int[] newArray, int index1, int index2, Color highlightColor) {
+        this.array = (newArray == null) ? new int[0] : newArray.clone();
+        draw(index1, index2, highlightColor);
     }
 
     public void setShowLabels(boolean show) {
@@ -84,8 +92,12 @@ public class VisualizerPane extends Pane {
         // 这样可以充分利用垂直空间，而不是被 floor 截断
         double unitPx = innerHeight / (double) maxVal;
 
-        // 计算每个柱子的宽度，使用浮点数以避免累积误差
-        double barWidth = (width - Math.max(0, (array.length - 1)) * BAR_GAP) / array.length;
+        // 计算每个柱子的宽度（考虑间距）
+        double totalGap = Math.max(0, (array.length - 1)) * BAR_GAP;
+        double barWidth = (width - totalGap) / array.length;
+        if (barWidth < 1) {
+            barWidth = 1;
+        }
 
         // 基线（面板底部往上 PADDING_BOTTOM 位置）
         double baseY = height - PADDING_BOTTOM;
@@ -104,10 +116,17 @@ public class VisualizerPane extends Pane {
 
             Rectangle rect = new Rectangle(x, y, barWidth, barHeight);
 
-            if (i == idx1 || i == idx2) {
+            // Apple-ish：圆角 + 细描边 + 轻微区分度
+            double arc = Math.min(10, barWidth);
+            rect.setArcWidth(arc);
+            rect.setArcHeight(arc);
+            rect.setStroke(COLOR_STROKE);
+            rect.setStrokeWidth(0.5);
+
+            if ((i == idx1 || i == idx2) && highlightColor != null) {
                 rect.setFill(highlightColor);
             } else {
-                rect.setFill(COLOR_DEFAULT);
+                rect.setFill(colorForValue(v, maxVal));
             }
 
             this.getChildren().add(rect);
@@ -123,5 +142,17 @@ public class VisualizerPane extends Pane {
                 this.getChildren().add(label);
             }
         }
+    }
+
+    private Color colorForValue(int value, int maxValue) {
+        if (maxValue <= 0) {
+            return COLOR_DEFAULT;
+        }
+        double t = Math.min(1.0, Math.max(0.0, value / (double) maxValue));
+        // 基于默认蓝色做明度变化，让柱子更易区分
+        double hue = 210; // 蓝
+        double saturation = 0.55;
+        double brightness = 0.55 + 0.35 * t;
+        return Color.hsb(hue, saturation, brightness);
     }
 }
