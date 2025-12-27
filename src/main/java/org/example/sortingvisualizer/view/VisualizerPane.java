@@ -14,7 +14,8 @@ public class VisualizerPane extends Pane {
 
     private int[] array;
     private static final int BAR_GAP = 2;
-    private boolean showLabels = false;
+    private static final double MAX_BAR_WIDTH = 42;
+    private boolean showLabels = true;
 
     // 颜色常量
     private static final Color COLOR_DEFAULT = Color.web("#7db3ff");
@@ -59,7 +60,15 @@ public class VisualizerPane extends Pane {
      */
     public void renderState(int[] newArray, int index1, int index2, Color highlightColor) {
         this.array = (newArray == null) ? new int[0] : newArray.clone();
-        draw(index1, index2, highlightColor);
+        draw(index1, index2, highlightColor, null);
+    }
+
+    /**
+     * 渲染“完成态”：所有柱子使用同一种颜色（例如排序完成的绿色）。
+     */
+    public void renderFinalState(int[] newArray, Color fillColor) {
+        this.array = (newArray == null) ? new int[0] : newArray.clone();
+        draw(-1, -1, null, fillColor);
     }
 
     public void setShowLabels(boolean show) {
@@ -68,10 +77,14 @@ public class VisualizerPane extends Pane {
     }
 
     private void draw() {
-        draw(-1, -1, null);
+        draw(-1, -1, null, null);
     }
 
     private void draw(int idx1, int idx2, Color highlightColor) {
+        draw(idx1, idx2, highlightColor, null);
+    }
+
+    private void draw(int idx1, int idx2, Color highlightColor, Color overrideFillColor) {
         this.getChildren().clear();
         if (array == null || array.length == 0) return;
 
@@ -92,12 +105,14 @@ public class VisualizerPane extends Pane {
         // 这样可以充分利用垂直空间，而不是被 floor 截断
         double unitPx = innerHeight / (double) maxVal;
 
-        // 计算每个柱子的宽度（考虑间距）
+        // 计算每个柱子的宽度（考虑间距，并设置最大宽度，避免数据量很小时柱子过粗）
         double totalGap = Math.max(0, (array.length - 1)) * BAR_GAP;
-        double barWidth = (width - totalGap) / array.length;
-        if (barWidth < 1) {
-            barWidth = 1;
-        }
+        double rawBarWidth = (width - totalGap) / array.length;
+        double barWidth = Math.min(Math.max(1, rawBarWidth), MAX_BAR_WIDTH);
+
+        // 如果柱子总宽度小于画布，则居中显示
+        double totalBarsWidth = array.length * barWidth + totalGap;
+        double startX = Math.max(0, (width - totalBarsWidth) / 2.0);
 
         // 基线（面板底部往上 PADDING_BOTTOM 位置）
         double baseY = height - PADDING_BOTTOM;
@@ -110,8 +125,8 @@ public class VisualizerPane extends Pane {
             double barHeight = v * unitPx;
             if (barHeight < 1 && v > 0) barHeight = 1; // 只要有值至少显示1px
 
-            // x 坐标也使用浮点数计算，避免整数取整导致的右侧留白
-            double x = i * (barWidth + BAR_GAP);
+            // x 坐标：居中 + 间距
+            double x = startX + i * (barWidth + BAR_GAP);
             double y = baseY - barHeight;
 
             Rectangle rect = new Rectangle(x, y, barWidth, barHeight);
@@ -125,6 +140,8 @@ public class VisualizerPane extends Pane {
 
             if ((i == idx1 || i == idx2) && highlightColor != null) {
                 rect.setFill(highlightColor);
+            } else if (overrideFillColor != null) {
+                rect.setFill(overrideFillColor);
             } else {
                 rect.setFill(colorForValue(v, maxVal));
             }
@@ -149,10 +166,10 @@ public class VisualizerPane extends Pane {
             return COLOR_DEFAULT;
         }
         double t = Math.min(1.0, Math.max(0.0, value / (double) maxValue));
-        // 基于默认蓝色做明度变化，让柱子更易区分
-        double hue = 210; // 蓝
-        double saturation = 0.55;
-        double brightness = 0.55 + 0.35 * t;
+        // Apple-ish：整体更明亮，避免“发黑”；同时保留轻微的深浅差异
+        double hue = 211; // 接近系统蓝
+        double saturation = 0.48;
+        double brightness = 0.78 + 0.16 * t; // 0.78..0.94
         return Color.hsb(hue, saturation, brightness);
     }
 }

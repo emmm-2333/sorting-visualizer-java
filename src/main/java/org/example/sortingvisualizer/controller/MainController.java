@@ -8,48 +8,43 @@ import java.util.stream.Collectors;
 import org.example.sortingvisualizer.algorithm.AlgorithmRegistry;
 import org.example.sortingvisualizer.algorithm.Sorter;
 import org.example.sortingvisualizer.model.PerformanceMetrics;
+import org.example.sortingvisualizer.playback.PlaybackController;
+import org.example.sortingvisualizer.playback.PlaybackSnapshot;
 import org.example.sortingvisualizer.service.BenchmarkService;
 import org.example.sortingvisualizer.service.DataInputService;
-import org.example.sortingvisualizer.service.SortingService;
 import org.example.sortingvisualizer.service.StepRecordingService;
 import org.example.sortingvisualizer.step.RecordedSort;
 import org.example.sortingvisualizer.step.SortOperation;
 import org.example.sortingvisualizer.step.SortOperationType;
-import org.example.sortingvisualizer.step.StepPlayer;
 import org.example.sortingvisualizer.util.DataGenerator;
+import org.example.sortingvisualizer.view.BenchmarkViewBuilder;
 import org.example.sortingvisualizer.view.VisualizerPane;
 
-import javafx.animation.PauseTransition;
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
-import javafx.scene.chart.BarChart;
-import javafx.scene.chart.CategoryAxis;
-import javafx.scene.chart.NumberAxis;
-import javafx.scene.chart.XYChart;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ComboBoxBase;
 import javafx.scene.control.Label;
 import javafx.scene.control.Slider;
-import javafx.scene.control.Tab;
-import javafx.scene.control.TabPane;
-import javafx.scene.control.TableColumn;
-import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextInputControl;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.paint.Color;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
-import javafx.util.Duration;
 
 /**
  * 主界面控制器（Controller）。
  * <p>
  * 角色定位：这是一个“流程编排器”，只负责 UI 交互、输入校验、任务启动与视图切换。
  * <ul>
- *   <li>排序算法实现、逐步回调与暂停协议：由 {@link SortingService} 与算法实现负责</li>
+ *   <li>排序步骤录制与回放：由 {@link StepRecordingService} 与 {@link org.example.sortingvisualizer.playback.PlaybackController} 负责</li>
  *   <li>性能比较与统计：由 {@link BenchmarkService} 负责</li>
  *   <li>数据解析（字符串/文件）：由 {@link DataInputService} 负责</li>
  *   <li>绘制与动画表现：由 {@link VisualizerPane} 负责</li>
@@ -63,6 +58,13 @@ import javafx.util.Duration;
  * </ul>
  */
 public class MainController {
+
+    private static final Color COLOR_SORTED_FINISH = Color.web("#30d158");
+
+    private final BenchmarkViewBuilder benchmarkViewBuilder = new BenchmarkViewBuilder();
+
+    /** 回放控制器：封装 next/prev/start/pause + 定时逻辑。 */
+    private final PlaybackController playbackController = new PlaybackController();
 
     /** 根布局容器：通过切换 center 来在“可视化面板/性能结果TabPane”之间切换。 */
     @FXML
@@ -140,14 +142,23 @@ public class MainController {
     @FXML
     private Label operationLabel;
 
+    /** 统计：比较次数（当前/总）。 */
+    @FXML
+    private Label compareCountLabel;
+
+    /** 统计：交换次数（当前/总）。 */
+    @FXML
+    private Label swapCountLabel;
+
+    /** 统计：写入次数（当前/总）。 */
+    @FXML
+    private Label setCountLabel;
+
     /** 可视化绘制面板（柱状图动画都在这里画）。 */
     private VisualizerPane visualizerPane;
 
     /** 当前用于展示/排序的数据源。生成/加载/自定义输入会覆盖它。 */
     private int[] currentArray;
-
-    /** 排序动画服务：创建排序 Task、处理暂停/恢复协议、在 UI 线程刷新可视化。 */
-    private final SortingService sortingService = new SortingService();
 
     /** 录制服务：把排序算法回调转换成可回放/可撤销的操作序列。 */
     private final StepRecordingService stepRecordingService = new StepRecordingService();
@@ -156,20 +167,19 @@ public class MainController {
     /** 输入服务：解析自定义输入字符串、读取文件并转成 int[]。 */
     private final DataInputService dataInputService = new DataInputService();
 
-    /** 当前排序任务引用：用于判断是否可暂停/继续，以及在结束时清理。 */
-    private Task<Void> currentSortTask;
-
     /** 当前录制任务引用：用于“退出排序”时取消。 */
     private Task<RecordedSort> currentRecordTask;
 
-    /** 回放播放器：支持 next/prev（apply/undo）。 */
-    private StepPlayer stepPlayer;
+    /** 快捷键是否已安装到 Scene。 */
+    private boolean shortcutsInstalled;
 
-    /** 回放定时器：使用 PauseTransition 方便动态调速。 */
-    private PauseTransition playbackTimer;
+    /** 统计前缀数组：prefix[i] 表示前 i 步（0..i-1）累计次数。 */
+    private int[] comparePrefix;
+    private int[] swapPrefix;
+    private int[] setPrefix;
 
-    /** 是否正在自动回放。 */
-    private boolean playbackPlaying;
+    /** 是否对当前回放禁用统计（例如：猴子排序步骤数量不可控）。 */
+    private boolean suppressStepStats;
 
     /** 启动排序前的数组快照：用于“退出排序”后恢复。 */
     private int[] arrayBeforeSort;
@@ -240,10 +250,12 @@ public class MainController {
         onGenerateData();
 
         // 6) 标签显示切换：只影响绘制，不影响排序逻辑。
-        //    控件允许为 null（例如 FXML 复用/裁剪），因此做空判断。
+        //    默认显示数值标签。
         if (showValuesCheckbox != null) {
+            showValuesCheckbox.setSelected(true);
             showValuesCheckbox.selectedProperty().addListener((obs, ov, nv) -> visualizerPane.setShowLabels(nv));
         }
+        visualizerPane.setShowLabels(true);
 
         // 7) 暂停按钮初始禁用：只有排序任务启动后才允许点击。
         if (pauseButton != null) {
@@ -268,6 +280,40 @@ public class MainController {
         if (operationLabel != null) {
             operationLabel.setText("-");
         }
+
+        if (compareCountLabel != null) compareCountLabel.setText("比较: 0/0");
+        if (swapCountLabel != null) swapCountLabel.setText("交换: 0/0");
+        if (setCountLabel != null) setCountLabel.setText("写入: 0/0");
+
+        // 9) 安装快捷键：←/→ 上一步/下一步，Space 暂停/继续
+        rootPane.sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene == null || shortcutsInstalled) return;
+            shortcutsInstalled = true;
+            newScene.addEventFilter(KeyEvent.KEY_PRESSED, this::onKeyPressed);
+        });
+    }
+
+    private void onKeyPressed(KeyEvent e) {
+        if (e == null) return;
+        if (!playbackController.isLoaded()) return;
+
+        // 避免影响输入框/下拉框/滑块的键盘操作
+        var scene = rootPane.getScene();
+        var focus = (scene != null) ? scene.getFocusOwner() : null;
+        if (focus instanceof TextInputControl) return;
+        if (focus instanceof ComboBoxBase<?>) return;
+        if (focus instanceof Slider) return;
+
+        if (e.getCode() == KeyCode.LEFT) {
+            onPrevStep();
+            e.consume();
+        } else if (e.getCode() == KeyCode.RIGHT) {
+            onNextStep();
+            e.consume();
+        } else if (e.getCode() == KeyCode.SPACE) {
+            onPauseResume();
+            e.consume();
+        }
     }
 
     @FXML
@@ -279,7 +325,7 @@ public class MainController {
 
         // 解析数据规模：提供默认值与边界限制。
         // 上限 500：避免柱子过密导致 UI 体验差 / 动画过慢。
-        int size = 50;
+        int size = 20;
         try {
             size = Integer.parseInt(dataSizeField.getText());
             if (size > 500) {
@@ -291,7 +337,7 @@ public class MainController {
             }
         } catch (NumberFormatException e) {
             // 非数字输入直接回退默认值
-            dataSizeField.setText("50");
+            dataSizeField.setText("20");
         }
 
         String type = dataTypeComboBox.getValue();
@@ -388,6 +434,21 @@ public class MainController {
         String algoName = algorithmComboBox.getValue();
         // algoName 为中文显示名；SortingService 内部会通过 AlgorithmRegistry 找到对应 Sorter
 
+        // 猴子排序在数据量稍大时步骤数呈阶乘级爆炸，录制/回放很容易导致内存或时间异常。
+        // 这里做硬保护，避免直接把程序拖崩。
+        if ("猴子排序".equals(algoName) && currentArray.length > 9) {
+            Alert alert = new Alert(Alert.AlertType.WARNING, "猴子排序在 n>9 时极易导致程序异常（步骤爆炸/内存耗尽）。\n\n建议：把数据量改为 5~9 再运行。", ButtonType.OK);
+            alert.setHeaderText("已阻止：猴子排序数据量过大");
+            alert.showAndWait();
+            setControlsDisabled(false);
+            resetStepUi();
+            statusLabel.setText("已取消：猴子排序数据量过大。");
+            return;
+        }
+
+        // 猴子排序步骤数量可能极大且波动，统计次数意义不大且容易影响体验，因此禁用。
+        suppressStepStats = "猴子排序".equals(algoName);
+
         // 排序过程中禁用输入控件：防止用户生成新数组/切换算法/启动 benchmark 造成并发与状态错乱。
         setControlsDisabled(true);
         statusLabel.setText("正在使用 " + algoName + " 排序...");
@@ -423,7 +484,21 @@ public class MainController {
         // 录制完成：初始化播放器并开始回放
         currentRecordTask.setOnSucceeded(e -> {
             RecordedSort recorded = currentRecordTask.getValue();
-            stepPlayer = new StepPlayer(recorded.initialArray(), recorded.operations());
+            if (suppressStepStats) {
+                comparePrefix = null;
+                swapPrefix = null;
+                setPrefix = null;
+                if (compareCountLabel != null) compareCountLabel.setText("比较: -/-");
+                if (swapCountLabel != null) swapCountLabel.setText("交换: -/-");
+                if (setCountLabel != null) setCountLabel.setText("写入: -/-");
+            } else {
+                initOperationStats(recorded.operations());
+            }
+
+            playbackController.setDelayMillis(delay);
+            playbackController.setOnUpdate(this::onPlaybackUpdate);
+            playbackController.setOnFinished(this::onPlaybackFinished);
+            playbackController.load(recorded);
 
             // 初始状态
             visualizerPane.setArray(recorded.initialArray());
@@ -435,7 +510,7 @@ public class MainController {
             }
             if (exitSortButton != null) exitSortButton.setDisable(false);
             if (prevStepButton != null) prevStepButton.setDisable(true);
-            if (nextStepButton != null) nextStepButton.setDisable(!stepPlayer.hasNext());
+            if (nextStepButton != null) nextStepButton.setDisable(!playbackController.hasNext());
 
             statusLabel.setText("回放中：" + algoName);
             startPlayback();
@@ -501,9 +576,9 @@ public class MainController {
     @FXML
     private void onPauseResume() {
         // 回放模式：暂停/继续 Timeline
-        if (stepPlayer == null) return;
+        if (!playbackController.isLoaded()) return;
 
-        if (playbackPlaying) {
+        if (playbackController.isPlaying()) {
             pausePlayback();
             statusLabel.setText("已暂停，支持上一步/下一步。");
         } else {
@@ -514,76 +589,69 @@ public class MainController {
 
     @FXML
     private void onPrevStep() {
-        if (stepPlayer == null) return;
+        if (!playbackController.isLoaded()) return;
         pausePlayback();
-        SortOperation op = stepPlayer.prev();
-        updateStepUi(op);
+        playbackController.prev();
     }
 
     @FXML
     private void onNextStep() {
-        if (stepPlayer == null) return;
+        if (!playbackController.isLoaded()) return;
         pausePlayback();
-        SortOperation op = stepPlayer.next();
-        updateStepUi(op);
+        playbackController.next();
     }
 
     private void startPlayback() {
-        if (stepPlayer == null) return;
-        playbackPlaying = true;
+        if (!playbackController.isLoaded()) return;
+        playbackController.setDelayMillis(delay);
         if (pauseButton != null) {
             pauseButton.setText("暂停");
         }
-        scheduleNextTick();
+        playbackController.start();
     }
 
     private void pausePlayback() {
-        playbackPlaying = false;
-        if (playbackTimer != null) {
-            playbackTimer.stop();
-            playbackTimer = null;
-        }
+        playbackController.pause();
         if (pauseButton != null) {
             pauseButton.setText("继续");
         }
     }
 
     private void stopPlaybackIfNeeded() {
+        // 停止回放前先清理回调：避免 pause/stop/load 过程中 emit 触发旧回调，
+        // 从而在统计前缀尚未初始化/已过期时造成越界。
+        playbackController.setOnUpdate(null);
+        playbackController.setOnFinished(null);
         pausePlayback();
-        stepPlayer = null;
+        playbackController.stop();
     }
 
-    private void scheduleNextTick() {
-        if (!playbackPlaying || stepPlayer == null) return;
+    private void onPlaybackUpdate(PlaybackSnapshot snapshot) {
+        if (snapshot == null) return;
+        updateStepUi(snapshot.operation());
+    }
 
-        playbackTimer = new PauseTransition(Duration.millis(delay));
-        playbackTimer.setOnFinished(evt -> {
-            if (!playbackPlaying || stepPlayer == null) return;
-
-            SortOperation op = stepPlayer.next();
-            updateStepUi(op);
-
-            if (stepPlayer.hasNext()) {
-                scheduleNextTick();
-            } else {
-                // 到头：停止回放，保持最终状态
-                pausePlayback();
-                if (pauseButton != null) {
-                    pauseButton.setDisable(true);
-                    pauseButton.setText("暂停");
-                }
-                if (exitSortButton != null) {
-                    exitSortButton.setDisable(true);
-                }
-                setControlsDisabled(false);
-                statusLabel.setText("排序完成！");
-            }
-        });
-        playbackTimer.play();
+    private void onPlaybackFinished() {
+        // 到头：停止回放，保持最终状态
+        pausePlayback();
+        visualizerPane.renderFinalState(playbackController.currentArray(), COLOR_SORTED_FINISH);
+        if (pauseButton != null) {
+            pauseButton.setDisable(true);
+            pauseButton.setText("暂停");
+        }
+        if (exitSortButton != null) {
+            exitSortButton.setDisable(true);
+        }
+        setControlsDisabled(false);
+        statusLabel.setText("排序完成！");
     }
 
     private void resetStepUi() {
         pausePlayback();
+        comparePrefix = null;
+        swapPrefix = null;
+        setPrefix = null;
+        suppressStepStats = false;
         if (pauseButton != null) {
             pauseButton.setDisable(true);
             pauseButton.setText("暂停");
@@ -595,16 +663,20 @@ public class MainController {
         if (nextStepButton != null) nextStepButton.setDisable(true);
         if (stepLabel != null) stepLabel.setText("步骤: 0/0");
         if (operationLabel != null) operationLabel.setText("-");
+
+        if (compareCountLabel != null) compareCountLabel.setText("比较: 0/0");
+        if (swapCountLabel != null) swapCountLabel.setText("交换: 0/0");
+        if (setCountLabel != null) setCountLabel.setText("写入: 0/0");
     }
 
     private void updateStepUi(SortOperation op) {
-        if (stepPlayer == null) {
+        if (!playbackController.isLoaded()) {
             if (stepLabel != null) stepLabel.setText("步骤: 0/0");
             if (operationLabel != null) operationLabel.setText("-");
             return;
         }
 
-        int[] state = stepPlayer.currentArray();
+        int[] state = playbackController.currentArray();
         if (op != null) {
             visualizerPane.renderState(state, op.index1(), op.index2(), colorForOperation(op.type()));
             if (operationLabel != null) {
@@ -617,11 +689,72 @@ public class MainController {
             }
         }
 
-        if (stepLabel != null) {
-            stepLabel.setText("步骤: " + stepPlayer.cursor() + "/" + stepPlayer.size());
+        // 若已到末尾（排序完成态），统一渲染为绿色，避免停留在最后一步高亮色。
+        if (playbackController.cursor() == playbackController.size()) {
+            visualizerPane.renderFinalState(state, COLOR_SORTED_FINISH);
         }
-        if (prevStepButton != null) prevStepButton.setDisable(!stepPlayer.hasPrev());
-        if (nextStepButton != null) nextStepButton.setDisable(!stepPlayer.hasNext());
+
+        if (stepLabel != null) {
+            stepLabel.setText("步骤: " + playbackController.cursor() + "/" + playbackController.size());
+        }
+        if (prevStepButton != null) prevStepButton.setDisable(!playbackController.hasPrev());
+        if (nextStepButton != null) nextStepButton.setDisable(!playbackController.hasNext());
+
+        updateStatsUi();
+    }
+
+    private void initOperationStats(List<SortOperation> operations) {
+        List<SortOperation> ops = (operations == null) ? List.of() : operations;
+        int size = ops.size();
+        comparePrefix = new int[size + 1];
+        swapPrefix = new int[size + 1];
+        setPrefix = new int[size + 1];
+        for (int i = 0; i < size; i++) {
+            comparePrefix[i + 1] = comparePrefix[i];
+            swapPrefix[i + 1] = swapPrefix[i];
+            setPrefix[i + 1] = setPrefix[i];
+
+            SortOperation op = ops.get(i);
+            if (op == null || op.type() == null) continue;
+            switch (op.type()) {
+                case COMPARE -> comparePrefix[i + 1]++;
+                case SWAP -> swapPrefix[i + 1]++;
+                case SET -> setPrefix[i + 1]++;
+            }
+        }
+    }
+
+    private void updateStatsUi() {
+        if (suppressStepStats) {
+            // 已在 onSort/onSucceeded 初始化为 -/-，此处保持不动
+            return;
+        }
+        if (!playbackController.isLoaded() || comparePrefix == null || swapPrefix == null || setPrefix == null) {
+            return;
+        }
+        int cursor = playbackController.cursor();
+        int total = playbackController.size();
+        if (cursor < 0) cursor = 0;
+        if (cursor > total) cursor = total;
+
+        // 防守：统计数组按“录制时 operations.size()”生成，理论上应与 total 一致。
+        // 若出现任何状态不同步（例如旧回调/旧统计未清干净），避免直接越界导致 UI 崩溃。
+        int maxIndex = Math.min(comparePrefix.length, Math.min(swapPrefix.length, setPrefix.length)) - 1;
+        if (maxIndex < 0) return;
+        if (total > maxIndex) total = maxIndex;
+        if (cursor > total) cursor = total;
+
+        int compareNow = comparePrefix[cursor];
+        int swapNow = swapPrefix[cursor];
+        int setNow = setPrefix[cursor];
+
+        int compareTotal = comparePrefix[total];
+        int swapTotal = swapPrefix[total];
+        int setTotal = setPrefix[total];
+
+        if (compareCountLabel != null) compareCountLabel.setText("比较: " + compareNow + "/" + compareTotal);
+        if (swapCountLabel != null) swapCountLabel.setText("交换: " + swapNow + "/" + swapTotal);
+        if (setCountLabel != null) setCountLabel.setText("写入: " + setNow + "/" + setTotal);
     }
 
     private Color colorForOperation(SortOperationType type) {
@@ -670,103 +803,13 @@ public class MainController {
         benchmarkTask.setOnFailed(e -> {
             setControlsDisabled(false);
             statusLabel.setText("性能比较失败: " + benchmarkTask.getException().getMessage());
-            benchmarkTask.getException().printStackTrace();
         });
 
         new Thread(benchmarkTask).start();
     }
 
     private void showBenchmarkResults(List<PerformanceMetrics> metrics, int size, String type) {
-        // 将中心视图切换为 TabPane：展示时间图/内存图/表格。
-        // Tab 标题携带 size/type，便于用户确认本次 benchmark 的参数。
-        TabPane tabPane = new TabPane();
-
-        String typeText = (type == null || type.isBlank()) ? "数据" : type;
-        String prefix = "[" + typeText + ", n=" + size + "] ";
-
-        Tab timeTab = new Tab(prefix + "时间对比", createTimeChart(metrics));
-        timeTab.setClosable(false);
-
-        Tab memoryTab = new Tab(prefix + "内存对比", createMemoryChart(metrics));
-        memoryTab.setClosable(false);
-
-        Tab tableTab = new Tab(prefix + "详细数据", createDetailTable(metrics));
-        tableTab.setClosable(false);
-
-        tabPane.getTabs().addAll(timeTab, memoryTab, tableTab);
-        rootPane.setCenter(tabPane);
-    }
-
-    private BarChart<String, Number> createTimeChart(List<PerformanceMetrics> metrics) {
-        // 柱状图：X=算法名，Y=耗时(毫秒)
-        // 注意：JavaFX 图表会基于数据自动计算坐标轴刻度
-        CategoryAxis xAxis = new CategoryAxis();
-        xAxis.setLabel("排序算法");
-        NumberAxis yAxis = new NumberAxis();
-        yAxis.setLabel("耗时 (毫秒)");
-
-        BarChart<String, Number> barChart = new BarChart<>(xAxis, yAxis);
-        barChart.setTitle("算法耗时对比");
-        barChart.setLegendVisible(false);
-
-        XYChart.Series<String, Number> series = new XYChart.Series<>();
-        for (PerformanceMetrics m : metrics) {
-            series.getData().add(new XYChart.Data<>(m.algorithmName(), m.getTimeElapsedMillis()));
-        }
-        barChart.getData().add(series);
-        return barChart;
-    }
-
-    private BarChart<String, Number> createMemoryChart(List<PerformanceMetrics> metrics) {
-        // 柱状图：X=算法名，Y=内存占用(MB)
-        // 注意：这里的内存值通常是“估算/采样”，不同 JVM/GC 策略会影响结果。
-        CategoryAxis xAxis = new CategoryAxis();
-        xAxis.setLabel("排序算法");
-        NumberAxis yAxis = new NumberAxis();
-        yAxis.setLabel("内存占用 (MB)");
-
-        BarChart<String, Number> barChart = new BarChart<>(xAxis, yAxis);
-        barChart.setTitle("算法内存占用对比 (估算)");
-        barChart.setLegendVisible(false);
-
-        XYChart.Series<String, Number> series = new XYChart.Series<>();
-        for (PerformanceMetrics m : metrics) {
-            series.getData().add(new XYChart.Data<>(m.algorithmName(), m.getMemoryUsageMB()));
-        }
-        barChart.getData().add(series);
-        return barChart;
-    }
-
-    private TableView<PerformanceMetrics> createDetailTable(List<PerformanceMetrics> metrics) {
-        // 表格：适合展示更完整的“算法元信息 + 实测耗时/内存”
-        TableView<PerformanceMetrics> table = new TableView<>();
-
-        TableColumn<PerformanceMetrics, String> nameCol = new TableColumn<>("算法名称");
-        nameCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(data.getValue().algorithmName()));
-
-        TableColumn<PerformanceMetrics, Number> timeCol = new TableColumn<>("耗时 (ms)");
-        timeCol.setCellValueFactory(data -> new javafx.beans.property.SimpleDoubleProperty(data.getValue().getTimeElapsedMillis()));
-
-        TableColumn<PerformanceMetrics, String> complexityCol = new TableColumn<>("平均时间复杂度");
-        complexityCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(data.getValue().algorithmInfo().averageTimeComplexity()));
-
-        TableColumn<PerformanceMetrics, String> spaceCol = new TableColumn<>("空间复杂度");
-        spaceCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(data.getValue().algorithmInfo().spaceComplexity()));
-
-        TableColumn<PerformanceMetrics, String> stableCol = new TableColumn<>("稳定性");
-        stableCol.setCellValueFactory(data -> new javafx.beans.property.SimpleStringProperty(data.getValue().algorithmInfo().isStable() ? "是" : "否"));
-
-        // 避免使用 addAll(varargs) 触发“未检查的泛型数组创建”警告，改为逐个 add。
-        table.getColumns().add(nameCol);
-        table.getColumns().add(timeCol);
-        table.getColumns().add(complexityCol);
-        table.getColumns().add(spaceCol);
-        table.getColumns().add(stableCol);
-
-        table.getItems().addAll(metrics);
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
-
-        return table;
+        rootPane.setCenter(benchmarkViewBuilder.buildResults(metrics, size, type));
     }
 
     private void setControlsDisabled(boolean disabled) {
