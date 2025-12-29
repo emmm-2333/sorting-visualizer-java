@@ -27,6 +27,16 @@ public final class PlaybackController {
 
     public void setDelayMillis(long delayMillis) {
         this.delayMillis = Math.max(1, delayMillis);
+
+        // 速度在自动回放过程中变化时，需立刻更新定时推进周期。
+        // 否则 timer 会继续按旧周期运行，用户会感觉“只有暂停/步进/重新开始才生效”。
+        if (playing && player != null) {
+            if (timer != null) {
+                timer.stop();
+                timer = null;
+            }
+            scheduleTick();
+        }
     }
 
     public void setOnUpdate(Consumer<PlaybackSnapshot> onUpdate) {

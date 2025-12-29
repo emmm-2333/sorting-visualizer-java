@@ -240,11 +240,14 @@ public class MainController {
 
         // 4) 速度滑块监听：滑块值越大，延迟越小（速度越快）。
         //    非线性指数映射：最快 1ms，最慢 1000ms。
-        speedSlider.valueProperty().addListener((obs, oldVal, newVal) ->
-            delay = mapSpeedToDelay(newVal.doubleValue())
-        );
+        speedSlider.valueProperty().addListener((obs, oldVal, newVal) -> {
+            delay = mapSpeedToDelay(newVal.doubleValue());
+            // 回放进行中也要实时刷新延迟，否则只会在“重新开始回放/按键步进后”才生效。
+            playbackController.setDelayMillis(delay);
+        });
         // 初始化一次 delay（否则第一次排序仍可能用默认 50ms）
         delay = mapSpeedToDelay(speedSlider.getValue());
+        playbackController.setDelayMillis(delay);
 
         // 5) 初始生成一组数据，保证一启动就有可视化内容。
         onGenerateData();
@@ -325,7 +328,7 @@ public class MainController {
 
         // 解析数据规模：提供默认值与边界限制。
         // 上限 500：避免柱子过密导致 UI 体验差 / 动画过慢。
-        int size = 20;
+        int size = 30;
         try {
             size = Integer.parseInt(dataSizeField.getText());
             if (size > 500) {
@@ -337,7 +340,7 @@ public class MainController {
             }
         } catch (NumberFormatException e) {
             // 非数字输入直接回退默认值
-            dataSizeField.setText("20");
+            dataSizeField.setText("30");
         }
 
         String type = dataTypeComboBox.getValue();

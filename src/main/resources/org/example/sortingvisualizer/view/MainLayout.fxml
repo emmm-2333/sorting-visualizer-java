@@ -20,7 +20,7 @@
                   <Label text="排序算法:" />
                   <ComboBox fx:id="algorithmComboBox" prefWidth="150.0" />
                   <Label text="数据量:" />
-                  <TextField fx:id="dataSizeField" prefWidth="80.0" text="20" />
+                  <TextField fx:id="dataSizeField" prefWidth="80.0" text="30" />
                   <Label text="数据类型:" />
                   <ComboBox fx:id="dataTypeComboBox" prefWidth="120.0" />
                   <Button fx:id="generateButton" mnemonicParsing="false" onAction="#onGenerateData" text="生成数据" />
