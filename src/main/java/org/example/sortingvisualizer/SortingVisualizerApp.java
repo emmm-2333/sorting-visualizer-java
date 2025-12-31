@@ -14,7 +14,6 @@ public class SortingVisualizerApp extends Application {
 
     @Override
     public void start(Stage stage) throws IOException {
-        // 使用绝对类路径，确保在打包和运行时都能找到 FXML
         FXMLLoader fxmlLoader = new FXMLLoader(
             SortingVisualizerApp.class.getResource("/org/example/sortingvisualizer/view/MainLayout.fxml")
         );
